@@ -16,6 +16,16 @@ class BaseBackend(ABC):
         """Initialize backend."""
         pass
 
+    @property
+    def vectorized(self) -> bool:
+        """Property wrapper for supports_vectorization()."""
+        return self.supports_vectorization()
+
+    @property
+    def gpu_accelerated(self) -> bool:
+        """Property wrapper for supports_gpu()."""
+        return self.supports_gpu()
+
     @abstractmethod
     def calc_q(self, p: Union[float, np.ndarray], bh_mass: float) -> Union[float, np.ndarray]:
         """Convert periastron P to Q.

@@ -26,7 +26,7 @@ except ImportError:
     NUMBA_AVAILABLE = False
 
 try:
-    from luminet.backends.ojo_backend import MojoBackend
+    from luminet.backends.mojo_backend import MojoBackend
     MOJO_AVAILABLE = True
 except ImportError:
     MOJO_AVAILABLE = False
