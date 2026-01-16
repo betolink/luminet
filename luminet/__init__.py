@@ -1,6 +1,6 @@
 """
-    Calculate and plot Swarzschild black holes with a thin accretion disk
-"""
+     Calculate and plot Swarzschild black holes with a thin accretion disk
+ """
 
 try:
     from importlib.metadata import version, metadata
@@ -24,3 +24,35 @@ except Exception:
     __author__ = "unknown"
     __email__ = "unknown"
     __license__ = "unknown"
+
+# Export backends (imported lazily to avoid circular imports)
+def get_backend(backend_name: str = "scipy", **kwargs):
+    """Get a computational backend instance.
+
+    Args:
+        backend_name: Name of backend ('scipy', 'taichi')
+        **kwargs: Additional arguments for backend
+
+    Returns:
+        Backend instance
+
+    Example:
+        backend = get_backend("scipy")
+        backend = get_backend("taichi", arch="cuda")
+    """
+    from luminet.backends import get_backend as _get_backend
+    return _get_backend(backend_name, **kwargs)
+
+
+def list_available_backends() -> list:
+    """List all available computational backends.
+
+    Returns:
+        List of backend names
+
+    Example:
+        >>> list_available_backends()
+        ['scipy', 'taichi']
+    """
+    from luminet.backends import list_available_backends as _list
+    return _list()
