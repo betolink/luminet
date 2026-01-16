@@ -6,8 +6,11 @@ This directory contains pluggable computational backends for luminet.
 
 The backend system allows users to choose between different computational implementations:
 
-- **scipy**: Original implementation using scipy.optimize.brentq and scipy.special
-- **taichi**: GPU-accelerated implementation (work-in-progress)
+- **scipy**: Original implementation using scipy.optimize.brentq and scipy.special (100% complete)
+- **taichi**: GPU-accelerated implementation (work-in-progress, skeleton)
+- **jax**: JAX-based with automatic vectorization and JIT compilation (skeleton)
+- **numba**: Numba JIT compilation for CPU with vectorization (skeleton)
+- **mojo**: Experimental Mojo backend (skeleton, requires Python FFI)
 
 ## File Structure
 
@@ -142,10 +145,13 @@ Expected speedup for Taichi backend (when complete):
 
 ## Current Status
 
-| Backend | Status | Complete | GPU Support |
-|---------|---------|-----------|--------------|
-| scipy   | ✅ Done | 100%      | ❌ No        |
-| taichi  | 🚧 WIP  | 10%       | ✅ Yes       |
+| Backend | Status | Complete | GPU Support | Vectorization |
+|---------|---------|-----------|--------------|--------------|
+| scipy   | ✅ Done | 100%      | ❌ No        | ❌ No |
+| taichi  | 🚧 WIP  | 10%       | ✅ Yes       | ✅ Yes |
+| jax     | 🚧 WIP  | 10%       | ✅ Yes       | ✅ Yes |
+| numba   | 🚧 WIP  | 10%       | ❌ No        | ✅ Yes |
+| mojo    | 🚧 WIP  | 5%        | ❌ No        | ❌ No |
 
 ### Scipy Backend
 - ✅ All core math functions implemented

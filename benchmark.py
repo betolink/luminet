@@ -309,7 +309,7 @@ Examples:
     parser.add_argument(
         '--engine',
         type=str,
-        choices=['scipy', 'taichi'] + list_available_backends(),
+        choices=['scipy', 'taichi', 'jax', 'numba', 'mojo'] + list_available_backends(),
         help='Backend to benchmark (default: compare all)'
     )
 

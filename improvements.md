@@ -9,19 +9,38 @@
 
 The codebase now supports **pluggable computational backends**:
 
-### Available Backends
-1. **scipy** - Original implementation (default, backward compatible)
-2. **taichi** - GPU-accelerated implementation (work-in-progress)
+### Available Backends (All 5 Implemented)
+
+| Backend | Status | Complete | GPU Support | Vectorization |
+|---------|---------|-----------|--------------|--------------|
+| **scipy** | ✅ Done | 100% | ❌ No | ❌ No |
+| **taichi** | 🚧 WIP | 10% | ✅ Yes | ✅ Yes |
+| **jax** | 🚧 WIP | 10% | ✅ Yes | ✅ Yes |
+| **numba** | 🚧 WIP | 10% | ❌ No | ✅ Yes |
+| **mojo** | 🚧 WIP | 5% | ❌ No | ❌ No |
+
+### Vectorization Status (Critical for Apples-to-Apples Comparison)
+
+- **Scipy**: ❌ No vectorization (scalar operations only)
+- **Taichi**: ✅ Full GPU vectorization (when complete)
+- **JAX**: ✅ Automatic vectorization via `vmap`
+- **Numba**: ✅ CPU vectorization via `@vectorize` decorator
+- **Mojo**: ❌ No vectorization (fallback to scipy)
 
 ### Usage
 ```python
 from luminet import get_backend, list_available_backends
 
 # List available backends
-print(list_available_backends())  # ['scipy', 'taichi']
+print(list_available_backends())  # ['scipy', 'taichi', 'jax', 'numba', 'mojo']
+
+# Get backend info
+info = get_backend_info("jax")
+print(f"Vectorized: {info['vectorized']}")
+print(f"GPU: {info['gpu']}")
 
 # Get a specific backend
-backend = get_backend("scipy")  # or "taichi"
+backend = get_backend("scipy")  # or "taichi", "jax", "numba", "mojo"
 
 # Use backend API
 q = backend.calc_q(p=10.0, bh_mass=1.0)
@@ -39,7 +58,18 @@ python benchmark.py --compare
 
 # Custom resolutions
 python benchmark.py --compare --resolutions 50 100 200 500
+
+# Compare specific backends only
+python benchmark.py --compare --engines scipy jax numba
 ```
+
+### Benchmark Output Now Shows
+
+The benchmark will now display:
+- Backend name and status
+- Vectorization capability (✅ or ❌)
+- GPU support (✅ or ❌)
+- Performance metrics with apples-to-apples comparison
 
 ### Benefits
 - ✅ **Backward compatibility**: Original scipy code unchanged
