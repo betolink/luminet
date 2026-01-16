@@ -87,37 +87,33 @@ class TaichiBackend(BaseBackend):
         TODO: Implement GPU-accelerated version.
         Currently falls back to scipy.
         """
-        if not TAICHI_AVAILABLE:
-            # Fallback to scipy implementation
-            from scipy.special import ellipj, ellipk, ellipkinc
+        # Fallback to scipy implementation
+        from scipy.special import ellipj, ellipk, ellipkinc
 
-            q = self.calc_q(p, bh_mass)
-            if q is np.nan:
-                return np.nan
+        q = self.calc_q(p, bh_mass)
+        if np.isnan(q):
+            return np.nan
 
-            z_inf = self.calc_zeta_inf(p, bh_mass)
-            m = self.calc_k_squared(p, bh_mass)
-            ell_inf = ellipkinc(z_inf, m)
+        z_inf = self.calc_zeta_inf(p, bh_mass)
+        m = self.calc_k_squared(p, bh_mass)
+        ell_inf = ellipkinc(z_inf, m)
 
-            cos_gamma = np.cos(angle) / np.sqrt(np.cos(angle) ** 2 + 1 / (np.tan(incl) ** 2))
-            g = np.arccos(cos_gamma)
+        cos_gamma = np.cos(angle) / np.sqrt(np.cos(angle) ** 2 + 1 / (np.tan(incl) ** 2))
+        g = np.arccos(cos_gamma)
 
-            if order == 0:
-                ellips_arg = g / (2.0 * np.sqrt(p / q)) + ell_inf
-            else:
-                ell_k = ellipk(m)
-                ellips_arg = (g - 2.0 * order * np.pi) / (2.0 * np.sqrt(p / q)) - ell_inf + 2.0 * ell_k
+        if order == 0:
+            ellips_arg = g / (2.0 * np.sqrt(p / q)) + ell_inf
+        else:
+            ell_k = ellipk(m)
+            ellips_arg = (g - 2.0 * order * np.pi) / (2.0 * np.sqrt(p / q)) - ell_inf + 2.0 * ell_k
 
-            sn, _, _, _ = ellipj(ellips_arg, m)
-            return sn
-
-        # TODO: Implement GPU kernel
-        raise NotImplementedError("Taichi GPU kernel not yet implemented")
+        sn, _, _, _ = ellipj(ellips_arg, m)
+        return sn
 
     def periastron_cost(self, p, radius, angle, bh_mass, incl, order=0):
         """Cost function for periastron optimization."""
         q = self.calc_q(p, bh_mass)
-        if q is np.nan:
+        if np.isnan(q):
             return np.nan
 
         sn = self.calc_sn(p, angle, bh_mass, incl, order)
@@ -129,11 +125,9 @@ class TaichiBackend(BaseBackend):
     def solve_for_periastron(self, radius, incl, alpha, bh_mass, order=0):
         """Solve for periastron given black hole coordinates.
 
-        TODO: Implement GPU-accelerated root finding.
-        Currently falls back to scipy.
+        Uses scipy for accuracy (GPU implementation TODO).
         """
-        from functools import partial
-        import scipy.optimize as opt
+        from luminet.solver import improve_solutions
 
         if radius <= 3 * bh_mass:
             return np.nan
@@ -160,9 +154,12 @@ class TaichiBackend(BaseBackend):
             "order": order,
         }
 
-        periastron = opt.brentq(partial(self.periastron_cost, **kwargs_eq13),
-                               periastron_initial_guess[0],
-                               periastron_initial_guess[1])
+        periastron = improve_solutions(
+            func=self.periastron_cost,
+            x=periastron_initial_guess,
+            y=y,
+            kwargs=kwargs_eq13,
+        )
 
         return periastron
 
@@ -173,7 +170,7 @@ class TaichiBackend(BaseBackend):
 
         periastron_solution = self.solve_for_periastron(radius, incl, alpha, bh_mass, order)
 
-        if periastron_solution is np.nan:
+        if np.isnan(periastron_solution):
             if order == 0 and ((alpha < np.pi / 2) or (alpha > 3 * np.pi / 2)):
                 return self._ellipse(radius, alpha, incl)
             else:

@@ -1,0 +1,30 @@
+name: luminet
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  # Core Python
+  - python>=3.9,<3.12
+  
+  # Core scientific computing
+  - numpy>=1.21
+  - scipy>=1.7
+  - matplotlib>=3.5
+  
+  # Numba for JIT compilation (CPU acceleration)
+  - numba>=0.56
+  
+  # JAX for auto-vectorization and GPU support
+  - jax>=0.4
+  - jaxlib>=0.4
+  
+  # Taichi for GPU kernels
+  - pip
+  
+  # Development tools
+  - pytest>=7.0
+  - pytest-benchmark>=4.0
+  
+  # pip-only packages
+  - pip:
+    - taichi>=1.6
