@@ -93,8 +93,9 @@ def generate_rotation_frames(
             radial_resolution=200
         )
         
-        # Create figure with specified background
-        fig, ax = plt.subplots(figsize=figsize, dpi=dpi, facecolor=bg_color)
+        # Create figure with polar projection for black hole visualization
+        fig, ax = plt.subplots(figsize=figsize, dpi=dpi, facecolor=bg_color,
+                               subplot_kw={'projection': 'polar'})
         ax.set_facecolor(bg_color)
         
         # Plot black hole with color scheme
@@ -185,7 +186,8 @@ def generate_orbit_frames(
             radial_resolution=200
         )
         
-        fig, ax = plt.subplots(figsize=figsize, dpi=dpi, facecolor=bg_color)
+        fig, ax = plt.subplots(figsize=figsize, dpi=dpi, facecolor=bg_color,
+                               subplot_kw={'projection': 'polar'})
         ax.set_facecolor(bg_color)
         
         # Plot with color scheme
@@ -270,7 +272,8 @@ def generate_zoom_frames(
             radial_resolution=200
         )
         
-        fig, ax = plt.subplots(figsize=figsize, dpi=dpi, facecolor=bg_color)
+        fig, ax = plt.subplots(figsize=figsize, dpi=dpi, facecolor=bg_color,
+                               subplot_kw={'projection': 'polar'})
         ax.set_facecolor(bg_color)
         
         # Plot with color scheme
@@ -421,7 +424,7 @@ Examples:
     
     # Resolution mapping (all dimensions must be even for h264)
     resolutions = {
-        '480p': (854, 480),   # Standard 480p (16:9, even width)
+        '480p': (856, 480),   # Standard 480p (16:9, width adjusted for even number and DPI rounding)
         '720p': (1280, 720),
         '1080p': (1920, 1080),
         '1440p': (2560, 1440),

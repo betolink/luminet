@@ -247,6 +247,12 @@ def main():
                        help='Output filename (default: blackhole.png)')
     parser.add_argument('--dpi', type=int, default=150,
                        help='DPI for output image (default: 150)')
+    parser.add_argument('--color-scheme', '--cmap', default='flux',
+                       choices=['flux', 'viridis', 'plasma', 'inferno', 'magma', 'cividis', 'coolwarm'],
+                       help='Color scheme for black hole (default: flux, physical greyscale)')
+    parser.add_argument('--bg-color', '--background', default='black',
+                       choices=['black', 'white'],
+                       help='Background color (default: black)')
     
     # Debug and benchmarking
     parser.add_argument('--debug', action='store_true',
@@ -382,11 +388,28 @@ def main():
         print(f"  Using backend: {bh.backend_name}")
     
     start_render = time.time()
-    ax = bh.plot()
+    
+    # Create figure with polar projection for black hole visualization
+    fig, ax = plt.subplots(subplot_kw={'projection': 'polar'})
+    fig.patch.set_facecolor(args.bg_color)
+    ax.set_facecolor(args.bg_color)
+    
+    # Plot with color scheme
+    if args.color_scheme == 'flux':
+        bh.plot(ax=ax)
+    else:
+        bh.plot(ax=ax, cmap=args.color_scheme)
+    
+    # Clean layout
+    ax.set_aspect('equal')
+    ax.axis('off')
+    fig.tight_layout(pad=0)
+    
     render_time = time.time() - start_render
     
     # Save
-    plt.savefig(args.output, dpi=args.dpi, bbox_inches='tight', facecolor='black')
+    plt.savefig(args.output, dpi=args.dpi, bbox_inches='tight', 
+               facecolor=args.bg_color, edgecolor='none')
     
     total_time = time.time() - start_total
     
