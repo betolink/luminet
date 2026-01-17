@@ -34,14 +34,14 @@ except ImportError:
 
 def get_backend(backend_name: str, **kwargs) -> BaseBackend:
     """Factory function to create a backend instance.
-
+    
     Args:
         backend_name: Name of backend ('scipy', 'taichi', 'jax', 'numba', 'mojo')
-        **kwargs: Additional arguments to pass to backend constructor
-
+        **kwargs: Additional arguments to pass to backend constructor (e.g., arch, gpu_device)
+    
     Returns:
         Backend instance
-
+    
     Raises:
         ValueError: If backend name is not recognized
         ImportError: If backend dependencies are not installed

@@ -65,6 +65,34 @@ def _init_taichi(arch: str = "auto", force: bool = False):
             ("cpu", ti.cpu, True),       # CPU always uses f64
         ]
     elif arch == "vulkan":
+        # Vulkan-only mode (for AMD/Intel GPUs)
+        arch_priority = [
+            ("vulkan", ti.vulkan, False),
+            ("vulkan", ti.vulkan, True),
+            ("cpu", ti.cpu, True),
+        ]
+    elif arch == "cuda":
+        # CUDA-only mode (for NVIDIA GPUs)
+        arch_priority = [
+            ("cuda", ti.cuda, False),
+            ("cuda", ti.cuda, True),
+            ("cpu", ti.cpu, True),
+        ]
+    elif arch == "nvidia":
+        # Force NVIDIA GPU mode (skip Vulkan, CUDA only)
+        arch_priority = [
+            ("cuda", ti.cuda, False),
+            ("cuda", ti.cuda, True),
+            ("cpu", ti.cpu, True),
+        ]
+    elif arch == "amd":
+        # Force AMD GPU mode (skip CUDA, Vulkan only)
+        arch_priority = [
+            ("vulkan", ti.vulkan, False),
+            ("vulkan", ti.vulkan, True),
+            ("cpu", ti.cpu, True),
+        ]
+    elif arch == "vulkan":
         arch_priority = [
             ("vulkan", ti.vulkan, False),
             ("vulkan", ti.vulkan, True),

@@ -418,6 +418,107 @@ def generate_azimuth_frames(
     return output_dir
 
 
+def generate_combined_frames(
+    output_dir: Path,
+    n_frames: int = 120,
+    resolution: tuple = (1920, 1080),
+    backend: str = 'taichi',
+    hw: str = 'gpu',
+    fps: int = 30,
+    speed: float = 1.0,
+    azimuth_speed: float = 1.0,
+    color_scheme: str = 'flux',
+    bg_color: str = 'white',
+    radial_res: int = 400,
+    angular_res: int = 200
+):
+    """Generate frames combining orbital motion with azimuth rotation.
+    
+    Camera orbits around black hole (azimuth rotation) while viewing angle
+    oscillates (inclination variation), creating complex orbital paths.
+    
+    Args:
+        output_dir: Directory to save frames
+        n_frames: Number of frames to generate
+        resolution: (width, height) in pixels
+        backend: Computational backend
+        hw: Hardware for taichi
+        fps: Target frames per second
+        speed: Animation speed for inclination oscillation
+        azimuth_speed: Speed of azimuth rotation (1.0 = 1 full circle)
+        color_scheme: Color scheme for black hole
+        bg_color: Background color
+    """
+    output_dir.mkdir(parents=True, exist_ok=True)
+    
+    # Setup backend
+    if backend == 'taichi':
+        backend_obj = get_backend('taichi', arch=hw)
+        bhmath._backend = backend_obj
+    else:
+        bhmath.set_backend(backend)
+    
+    # Combined motion: sinusoidal inclination + azimuth rotation
+    base_incl = 1.2
+    incl_variation = 0.3
+    phases = np.linspace(0, 2 * np.pi * speed, n_frames)
+    inclinations = base_incl + incl_variation * np.sin(phases)
+    
+    # Azimuth varies from 0 to 2π * azimuth_speed
+    azimuth_angles = np.linspace(0, 2 * np.pi * azimuth_speed, n_frames)
+    
+    # Figure setup
+    dpi = 100
+    figsize = (resolution[0] / dpi, resolution[1] / dpi)
+    
+    print(f"Generating {n_frames} combined frames at {resolution[0]}×{resolution[1]}...")
+    print(f"Backend: {backend} ({hw if backend == 'taichi' else 'N/A'})")
+    print(f"Inclination: {np.degrees(base_incl):.1f}° ± {np.degrees(incl_variation):.1f}°")
+    print(f"Azimuth: {360 * azimuth_speed:.0f}° rotation")
+    print()
+    
+    for i, (incl, azimuth) in enumerate(tqdm(zip(inclinations, azimuth_angles), desc="Rendering frames", total=n_frames)):
+        bh = BlackHole(
+            mass=1.0,
+            incl=incl,
+            acc=1.0,
+            outer_edge=20.0,
+            radial_resolution=radial_res,
+            angular_resolution=angular_res
+        )
+        
+        if color_scheme == 'flux':
+            ax = bh.plot()
+        else:
+            ax = bh.plot(cmap=color_scheme)
+        
+        fig = plt.gcf()
+        fig.set_size_inches(figsize)
+        fig.set_dpi(dpi)
+        fig.patch.set_facecolor(bg_color)
+        ax.set_facecolor(bg_color)
+        
+        # Rotate entire plot for azimuth animation
+        ax.set_theta_offset(azimuth)
+        
+        title_color = 'black' if bg_color == 'white' else 'white'
+        azimuth_degrees = np.degrees(azimuth) % 360
+        incl_degrees = np.degrees(incl)
+        ax.set_title(f'Azimuth: {azimuth_degrees:.0f}° | Inclination: {incl_degrees:.1f}°', 
+                     fontsize=16, color=title_color)
+        
+        ax.set_aspect('equal')
+        ax.axis('off')
+        plt.subplots_adjust(left=0, right=1, top=1, bottom=0)
+        
+        frame_path = output_dir / f"frame_{i:04d}.png"
+        fig.savefig(frame_path, dpi=dpi, facecolor=bg_color, edgecolor='none')
+        plt.close(fig)
+    
+    print(f"\n✅ Generated {n_frames} frames in {output_dir}")
+    return output_dir
+
+
 def create_video_from_frames(frames_dir: Path, output_path: Path, fps: int = 30):
     """Create video from frame images using ffmpeg.
     
@@ -496,10 +597,13 @@ Examples:
    # Zoom animation
    python generate_video.py --type zoom --frames 60
    
-   # Azimuth animation (camera rotation around black hole)
-   python generate_video.py --type azimuth --frames 300 --inclination 20
-   
-   # High quality 1080p with GPU and custom colors
+    # Azimuth animation (camera rotation around black hole)
+    python generate_video.py --type azimuth --frames 300 --inclination 20
+    
+    # Combined orbit + azimuth (complex orbital path)
+    python generate_video.py --type combined --frames 180 --azimuth-speed 2.0
+    
+    # High quality 1080p with GPU and custom colors
    python generate_video.py --type rotation --resolution 1080p --backend taichi --hw gpu --color-scheme inferno
   
   # Quick preview at 720p
@@ -507,7 +611,7 @@ Examples:
         """
      )
     
-    parser.add_argument('--type', choices=['rotation', 'orbit', 'zoom', 'azimuth'], 
+    parser.add_argument('--type', choices=['rotation', 'orbit', 'zoom', 'azimuth', 'combined'], 
                         default='rotation',
                         help='Type of animation (default: rotation)')
     parser.add_argument('--frames', type=int, default=60,
@@ -534,7 +638,9 @@ Examples:
     
     # Animation control
     parser.add_argument('--speed', type=float, default=1.0,
-                        help='Animation speed multiplier (default: 1.0, higher=faster rotation)')
+                        help='Animation speed multiplier for inclination (default: 1.0, higher=faster)')
+    parser.add_argument('--azimuth-speed', type=float, default=1.0,
+                        help='Azimuth rotation speed (default: 1.0, number of full circles)')
     parser.add_argument('--color-scheme', '--cmap', default='flux',
                         choices=['flux', 'viridis', 'plasma', 'inferno', 'hot', 'cool', 'rainbow', 'jet', 'Greys_r'],
                         help='Color scheme for black hole (default: flux)')
@@ -590,10 +696,15 @@ Examples:
                               args.radial_res, args.angular_res)
     elif args.type == 'azimuth':
         generate_azimuth_frames(frames_dir, args.frames, resolution,
-                                args.backend, args.hw, args.fps,
-                                args.speed, args.color_scheme, args.bg_color,
-                                args.radial_res, args.angular_res,
-                                np.radians(args.inclination))
+                                 args.backend, args.hw, args.fps,
+                                 args.speed, args.color_scheme, args.bg_color,
+                                 args.radial_res, args.angular_res,
+                                 np.radians(args.inclination))
+    elif args.type == 'combined':
+        generate_combined_frames(frames_dir, args.frames, resolution,
+                                  args.backend, args.hw, args.fps,
+                                  args.speed, args.azimuth_speed, args.color_scheme, args.bg_color,
+                                  args.radial_res, args.angular_res)
     
     # Create video
     success = create_video_from_frames(frames_dir, output_video, args.fps)

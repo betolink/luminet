@@ -33,30 +33,46 @@ class JAXBackend(BaseBackend):
     Note: Root finding and elliptic functions use scipy for accuracy.
     """
 
-    def __init__(self, use_gpu=False):
+    def __init__(self, use_gpu=False, gpu_device=None):
         """Initialize JAX backend.
         
         Args:
-            use_gpu: Whether to use GPU (default: False)
+            use_gpu: Whether to use GPU (deprecated, use gpu_device instead)
+            gpu_device: GPU device selection - 'nvidia', 'amd', or 'auto' (default: auto)
         """
         super().__init__()
+        
+        # Map gpu_device to JAX platform names
+        if gpu_device is not None:
+            self.gpu_device = gpu_device.lower()
+        elif use_gpu:
+            self.gpu_device = 'auto'
+        else:
+            self.gpu_device = 'cpu'
+        
+        gpu_device_map = {
+            'nvidia': 'gpu',
+            'amd': 'cpu',  # JAX doesn't support AMD GPU
+            'auto': 'gpu',  # Auto-detect CUDA
+            'cpu': 'cpu',
+        }
+        
+        self.jax_platform = gpu_device_map.get(self.gpu_device, 'cpu')
         
         if not JAX_AVAILABLE:
             raise ImportError(
                 "JAX is not installed. "
                 "Install with: pip install jax jaxlib"
-            )
+        )
         
         self.name = "jax"
         self.use_gpu = use_gpu
         
-        # Configure device
+        # Configure JAX platform (GPU/CPU)
         if use_gpu:
-            try:
-                jax.config.update('jax_platform_name', 'gpu')
-            except Exception:
-                jax.config.update('jax_platform_name', 'cpu')
-                self.use_gpu = False
+            jax.config.update('jax_platform_name', self.jax_platform)
+        else:
+            jax.config.update('jax_platform_name', 'cpu')
         
         # JIT compile simple functions
         self._calc_q_jit = jit(self._calc_q_impl)
