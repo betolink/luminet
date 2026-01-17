@@ -2,11 +2,64 @@
 
 This module contains the mathematical routines to calculate the trajectory of photons around 
 a Swarzschild black hole, as described in :cite:t:`Luminet_1979`.
+
+Note:
+    This module now supports multiple computational backends (scipy, numba, taichi, jax).
+    Use :func:`set_backend` to change the backend globally, or use the default scipy backend.
 """
 import numpy as np
-from scipy.special import ellipj, ellipk, ellipkinc
 
 from luminet.solver import improve_solutions
+
+# Backend management
+_backend = None
+
+def set_backend(backend_name='scipy', **kwargs):
+    """Set the computational backend for all black hole math operations.
+    
+    Args:
+        backend_name: Name of backend ('scipy', 'numba', 'taichi', 'jax')
+        **kwargs: Additional arguments passed to backend constructor
+                 (e.g., arch='gpu' for taichi)
+    
+    Example::
+    
+        import luminet.black_hole_math as bhmath
+        
+        # Use default scipy backend
+        bhmath.set_backend('scipy')
+        
+        # Use Numba for 10× speedup
+        bhmath.set_backend('numba')
+        
+        # Use Taichi CPU
+        bhmath.set_backend('taichi', arch='cpu')
+    
+    Returns:
+        BaseBackend: The initialized backend instance
+    """
+    global _backend
+    from luminet.backends import get_backend
+    _backend = get_backend(backend_name, **kwargs)
+    return _backend
+
+def get_current_backend():
+    """Get the currently active computational backend.
+    
+    Returns scipy backend if none has been explicitly set.
+    
+    Returns:
+        BaseBackend: Current backend instance
+    """
+    global _backend
+    if _backend is None:
+        set_backend('scipy')
+    return _backend
+
+def reset_backend():
+    """Reset to default scipy backend."""
+    global _backend
+    _backend = None
 
 def calc_q(p: float, bh_mass: float) -> float:
     r"""Convert periastron :math:`P` to :math:`Q`
@@ -24,10 +77,11 @@ def calc_q(p: float, bh_mass: float) -> float:
 
     Returns:
         float: :math:`Q`
+    
+    Note:
+        Uses the currently active computational backend.
     """
-    if p < 2.0 * bh_mass:
-        return np.nan
-    return np.sqrt((p - 2.0 * bh_mass) * (p + 6.0 * bh_mass))
+    return get_current_backend().calc_q(p, bh_mass)
 
 
 def calc_b_from_periastron(p: float, bh_mass: float) -> float:
@@ -99,12 +153,11 @@ def calc_k_squared(p: float, bh_mass: float):
     Args:
         p (float): periastron distance
         bh_mass (float): Black hole mass
+    
+    Note:
+        Uses the currently active computational backend.
     """
-    q = calc_q(p, bh_mass)
-    if q is np.nan:
-        return np.nan
-    # WARNING: Paper has an error here. There should be brackets around the numerator.
-    return (q - p + 6 * bh_mass) / (2 * q)
+    return get_current_backend().calc_k_squared(p, bh_mass)
 
 
 def calc_zeta_inf(p: float, bh_mass: float) -> float:
@@ -122,13 +175,11 @@ def calc_zeta_inf(p: float, bh_mass: float) -> float:
 
     Returns:
         float: :math:`\zeta_\infty`
+    
+    Note:
+        Uses the currently active computational backend.
     """
-    q = calc_q(p, bh_mass)
-    if q is np.nan:
-        return np.nan
-    arg = (q - p + 2 * bh_mass) / (q - p + 6 * bh_mass)
-    z_inf = np.arcsin(np.sqrt(arg))
-    return z_inf
+    return get_current_backend().calc_zeta_inf(p, bh_mass)
 
 
 def calc_zeta_r(p: float, r: float, bh_mass: float) -> float:
@@ -221,31 +272,11 @@ def calc_sn(
 
     Returns:
         float: Value of the elliptic integral :math:`\text{sn}`
+    
+    Note:
+        Uses the currently active computational backend.
     """
-    q = calc_q(p, bh_mass)
-    if q is np.nan:
-        return np.nan
-    z_inf = calc_zeta_inf(p, bh_mass)
-    m = calc_k_squared(p, bh_mass)  # mpmath takes m = k² as argument.
-    ell_inf = ellipkinc(z_inf, m)  # Elliptic integral F(zeta_inf, k)
-    g = np.arccos(calc_cos_gamma(angle, incl))
-
-    if order == 0:  # higher order image
-        ellips_arg = g / (2.0 * np.sqrt(p / q)) + ell_inf
-    elif order > 0:  # direct image
-        ell_k = ellipk(m)  # calculate complete elliptic integral of mod m = k²
-        ellips_arg = (
-            (g - 2.0 * order * np.pi) / (2.0 * np.sqrt(p / q))
-            - ell_inf
-            + 2.0 * ell_k
-        )
-    else:
-        raise NotImplementedError(
-            "Only 0 and positive integers are allowed for the image order."
-        )
-
-    sn, _, _, _ = ellipj(ellips_arg, m)
-    return sn
+    return get_current_backend().calc_sn(p, angle, bh_mass, incl, order)
 
 
 def calc_radius(
@@ -422,25 +453,13 @@ def solve_for_impact_parameter(
 
     Returns:
         float: Impact parameter :math:`b` of the photon
+    
+    Note:
+        Uses the currently active computational backend for optimal performance.
     """
-    # alpha_obs is flipped alpha/bh if n is odd
-    if order % 2 == 1:
-        alpha = (alpha + np.pi) % (2 * np.pi)
-
-    periastron_solution = solve_for_periastron(radius, incl, alpha, bh_mass, order)
-
-    # Photons that have no periastron and are not due to the exception described above are simply absorbed
-    if periastron_solution is np.nan:
-        if order == 0 and ((alpha < np.pi / 2) or (alpha > 3 * np.pi / 2)):
-            # Photons with small R in the lower half of the image originate from photon orbits that
-            # have a periastron < 3M. However, these photons are not absorbed by the black hole and do in fact reach the camera,
-            # since they never actually travel this forbidden part of their orbit.
-            # --> Return the newtonian limit i.e. just an ellipse, like the rings of saturn that are visible in front of saturn.
-            return ellipse(radius, alpha, incl)
-        else:
-            return np.nan
-    b = calc_b_from_periastron(periastron_solution, bh_mass)
-    return b
+    return get_current_backend().solve_for_impact_parameter(
+        radius, incl, alpha, bh_mass, order
+    )
 
 
 def ellipse(r, a, incl) -> float:

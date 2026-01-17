@@ -56,7 +56,8 @@ class BenchmarkResult:
 def benchmark_backend(
     backend_name: str,
     resolutions: list = [50, 100, 200],
-    repeat: int = 3
+    repeat: int = 3,
+    process: str = None
 ) -> BenchmarkResult:
     """Run benchmarks for a specific backend.
 
@@ -64,17 +65,25 @@ def benchmark_backend(
         backend_name: Name of backend to benchmark
         resolutions: List of resolutions to test
         repeat: Number of times to repeat each test
+        process: Processing mode for taichi ('gpu', 'cpu', 'vulkan', 'cuda', 'auto')
 
     Returns:
         BenchmarkResult object
     """
-    print(f"\nInitializing {backend_name} backend...")
+    process_str = f" (process={process})" if process else ""
+    print(f"\nInitializing {backend_name} backend{process_str}...")
 
     try:
-        backend = get_backend(backend_name)
+        # Pass arch parameter to taichi backend
+        if backend_name == "taichi" and process:
+            backend = get_backend(backend_name, arch=process)
+        else:
+            backend = get_backend(backend_name)
         print(f"✓ Backend initialized: {backend.get_backend_name()}")
         print(f"  Supports GPU: {backend.supports_gpu()}")
         print(f"  Supports vectorization: {backend.supports_vectorization()}")
+        if hasattr(backend, 'get_arch'):
+            print(f"  Architecture: {backend.get_arch()}")
     except Exception as e:
         print(f"✗ Failed to initialize backend: {e}")
         return None
@@ -203,12 +212,13 @@ def benchmark_backend(
     return result
 
 
-def compare_backends(backend_names: list = None, resolutions: list = [50, 100, 200]):
+def compare_backends(backend_names: list = None, resolutions: list = [50, 100, 200], process: str = None):
     """Compare performance between multiple backends.
 
     Args:
         backend_names: List of backend names to compare
         resolutions: Resolutions to test
+        process: Processing mode for taichi ('gpu', 'cpu', etc.)
     """
     if backend_names is None:
         backend_names = list_available_backends()
@@ -220,7 +230,7 @@ def compare_backends(backend_names: list = None, resolutions: list = [50, 100, 2
     # Run benchmarks for each backend
     all_results = {}
     for backend_name in backend_names:
-        result = benchmark_backend(backend_name, resolutions=resolutions)
+        result = benchmark_backend(backend_name, resolutions=resolutions, process=process)
         if result:
             all_results[backend_name] = result
 
@@ -300,7 +310,8 @@ def main():
         epilog="""
 Examples:
   python benchmark.py --engine=scipy
-  python benchmark.py --engine=taichi
+  python benchmark.py --engine=taichi --process=gpu
+  python benchmark.py --engine=taichi --process=cpu
   python benchmark.py --compare
   python benchmark.py --compare --resolutions 50 100 200
         """
@@ -334,6 +345,14 @@ Examples:
         help='Number of times to repeat each test (default: 3)'
     )
 
+    parser.add_argument(
+        '--process',
+        type=str,
+        choices=['gpu', 'cpu', 'vulkan', 'cuda', 'auto'],
+        default=None,
+        help='Processing mode for taichi backend (gpu, cpu, vulkan, cuda, auto)'
+    )
+
     args = parser.parse_args()
 
     # Print banner
@@ -344,14 +363,15 @@ Examples:
 
     # Run benchmarks
     if args.compare:
-        compare_backends(resolutions=args.resolutions)
+        compare_backends(resolutions=args.resolutions, process=args.process)
     elif args.engine:
-        result = benchmark_backend(args.engine, resolutions=args.resolutions, repeat=args.repeat)
+        result = benchmark_backend(args.engine, resolutions=args.resolutions, 
+                                   repeat=args.repeat, process=args.process)
         if result:
             result.print_summary()
     else:
         # Default to compare
-        compare_backends(resolutions=args.resolutions)
+        compare_backends(resolutions=args.resolutions, process=args.process)
 
 
 if __name__ == "__main__":
