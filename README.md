@@ -27,13 +27,15 @@ pixi add --pypi luminet
 ## 📖 Documentation
 
 - [Official Documentation](https://luminet.readthedocs.io/en/latest/index.html)
-- **GPU Acceleration Guides**:
-  - [NVIDIA_GPU_EXPECTATIONS.md](NVIDIA_GPU_EXPECTATIONS.md) - Setup guide for NVIDIA GPUs
-  - [GPU_IMPLEMENTATION_COMPLETE.md](GPU_IMPLEMENTATION_COMPLETE.md) - Technical implementation details
-- **Backend References**:
-  - [BACKEND_INTEGRATION_SUMMARY.md](BACKEND_INTEGRATION_SUMMARY.md) - Complete backend API reference
-  - [Backend README](luminet/backends/README.md) - Developer documentation
-- [SESSION_SUMMARY.md](SESSION_SUMMARY.md) - Latest development updates
+- **Documentation**:
+  - [QUICKSTART.md](QUICKSTART.md) - Quick start guide
+  - [GPU_BACKENDS.md](GPU_BACKENDS.md) - GPU setup and hardware requirements
+  - [VIDEO_GENERATION.md](VIDEO_GENERATION.md) - Video generation guide
+  - [PERF.md](PERF.md) - Performance benchmarks
+  - [BACKEND_DEFAULTS.md](BACKEND_DEFAULTS.md) - Default settings reference
+- **Technical Documentation**:
+  - [docs/TECHNICAL.md](docs/TECHNICAL.md) - Precision analysis, backend architecture, numerical methods
+  - [luminet/backends/README.md](luminet/backends/README.md) - Backend developer documentation
 
 ## 🔩 Usage
 
@@ -120,7 +122,7 @@ bh = BlackHole(mass=1, incl=1.4, acc=1, outer_edge=40)
 - **AMD GPUs**: Taichi (Vulkan) works, JAX not supported
 - **Precision**: Consumer GPUs use f32 (~1e-7 accuracy), professional GPUs may support f64
 
-For detailed GPU setup, see [NVIDIA_GPU_EXPECTATIONS.md](NVIDIA_GPU_EXPECTATIONS.md).
+For detailed GPU setup, see [GPU_BACKENDS.md](GPU_BACKENDS.md).
 
 ### Command-Line Rendering
 
@@ -158,9 +160,10 @@ Measured performance (200×200 resolution render):
 - GPU backends (taichi-gpu, jax-gpu): f32 precision, max error ~1e-7 (sufficient for visualization)
 
 For detailed performance analysis and GPU setup guides:
-- [GPU_IMPLEMENTATION_COMPLETE.md](GPU_IMPLEMENTATION_COMPLETE.md) - Technical details
-- [NVIDIA_GPU_EXPECTATIONS.md](NVIDIA_GPU_EXPECTATIONS.md) - NVIDIA GPU setup guide
-- [BACKEND_INTEGRATION_SUMMARY.md](BACKEND_INTEGRATION_SUMMARY.md) - Complete backend reference
+- [PERF.md](PERF.md) - Performance benchmarks
+- [GPU_BACKENDS.md](GPU_BACKENDS.md) - GPU setup and hardware requirements
+- [docs/TECHNICAL.md](docs/TECHNICAL.md) - Precision analysis and backend architecture
+- [luminet/backends/README.md](luminet/backends/README.md) - Backend developer documentation
 
 
 ## 📝 Background

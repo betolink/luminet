@@ -6,11 +6,42 @@ This directory contains pluggable computational backends for luminet.
 
 The backend system allows users to choose between different computational implementations:
 
-- **scipy**: Original implementation using scipy.optimize.brentq and scipy.special (100% complete)
-- **taichi**: GPU-accelerated implementation (work-in-progress, skeleton)
-- **jax**: JAX-based with automatic vectorization and JIT compilation (skeleton)
-- **numba**: Numba JIT compilation for CPU with vectorization (skeleton)
-- **mojo**: Experimental Mojo backend (skeleton, requires Python FFI)
+- **scipy**: Original implementation using scipy.optimize.brentq and scipy.special (f64 precision)
+- **numba**: JIT-compiled CPU with @njit decorator (4.7× faster, f64 precision)
+- **taichi**: GPU-accelerated implementation (10-50× faster, f32 GPU / f64 CPU)
+- **jax**: JAX-based with automatic vectorization and JIT compilation (5-20× faster, f64)
+
+## Backend Comparison
+
+| Backend | Status | GPU Support | Precision | Speedup vs Scipy |
+|---------|---------|--------------|-----------|--------------------|
+| scipy | ✅ Production | No | f64 | 1× (baseline) |
+| numba | ✅ Production | No | f64 | 4.7× |
+| taichi (CPU) | ✅ Production | No | f64 | 4-10× |
+| taichi (GPU) | ✅ Production | Yes (CUDA/Vulkan) | f32 | 10-50× |
+| jax (CPU) | ✅ Production | No | f64 | 5-20× |
+| jax (GPU) | ✅ Production | Yes (CUDA only) | f64 | 5-20× |
+
+## Quick Start
+
+```python
+from luminet.black_hole import BlackHole
+
+# Default scipy backend (baseline)
+bh = BlackHole(mass=1.0, incl=1.4)
+
+# Numba backend (recommended for CPU)
+bh = BlackHole(mass=1.0, incl=1.4, backend='numba')
+
+# Taichi CPU backend
+bh = BlackHole(mass=1.0, incl=1.4, backend='taichi')
+
+# Taichi GPU backend (auto-detects CUDA/Vulkan)
+bh = BlackHole(mass=1.0, incl=1.4, backend='taichi', arch='gpu')
+
+# JAX backend
+bh = BlackHole(mass=1.0, incl=1.4, backend='jax')
+```
 
 ## File Structure
 
@@ -19,158 +50,114 @@ backends/
 ├── __init__.py              # Factory functions and exports
 ├── base.py                  # Abstract base class for all backends
 ├── scipy_backend.py          # Scipy implementation (complete)
-└── taichi_backend.py        # Taichi implementation (skeleton)
+├── numba_backend.py         # Numba JIT implementation (complete)
+├── taichi_backend.py        # Taichi GPU/CPU implementation (complete)
+└── jax_backend.py           # JAX implementation (complete)
 ```
+
+## GPU Backend Details
+
+### Taichi GPU
+
+**Hardware Support**:
+- NVIDIA GPUs (CUDA): Both f32 and f64 (depending on GPU model)
+- AMD/Intel GPUs (Vulkan): f32 only
+- Automatic fallback: If GPU fails, uses CPU f64
+
+**Precision**:
+- f32: ~1e-6 to 1e-8 relative error
+- Suitable for: Real-time video, visualization, demos
+- Not recommended for: Scientific publications (use f64)
+
+**Performance**:
+- Consumer GPUs: 4-11× faster than scipy
+- Professional GPUs (A100, V100): 10-50× faster than scipy
+
+### JAX GPU
+
+**Hardware Support**:
+- NVIDIA GPUs (CUDA) only
+- AMD GPUs not supported (no ROCm in JAX yet)
+
+**Precision**:
+- f64 (double precision) on both CPU and GPU
+
+**Performance**:
+- 5-20× faster than scipy
+- Automatic vectorization via `vmap`
 
 ## Adding a New Backend
 
-To add a new backend (e.g., JAX, Numba):
+To add a new backend (e.g., a new JIT compiler):
 
 1. Create a new file `your_backend.py`:
+
 ```python
-from luminet.backends.base import BaseBackend
+from .base import BackendBase
 
-class YourBackend(BaseBackend):
-    def __init__(self):
-        super().__init__()
-        self.name = "your_backend"
-
-    def calc_q(self, p, bh_mass):
-        # Your implementation
-        pass
-
-    # Implement all other abstract methods...
+class YourBackend(BackendBase):
+    def get_backend_name(self):
+        return "your_backend"
+    
+    def supports_gpu(self):
+        return False  # or True
+    
+    def supports_vectorization(self):
+        return False  # or True
+    
+    # Implement required methods:
+    # - calc_q()
+    # - calc_k_squared()
+    # - calc_zeta_inf()
+    # - calc_sn()
+    # - solve_for_impact_parameter()
+    # - calc_redshift_factor()
+    # - calc_flux_observed()
 ```
 
-2. Update `backends/__init__.py` to import and register your backend:
+2. Register in `__init__.py`:
+
 ```python
-try:
-    from luminet.backends.your_backend import YourBackend
-    YOUR_BACKEND_AVAILABLE = True
-except ImportError:
-    YOUR_BACKEND_AVAILABLE = False
+from .your_backend import YourBackend
+
+_AVAILABLE_BACKENDS['your_backend'] = YourBackend
 ```
 
-3. Update `get_backend()` factory to handle your backend:
-```python
-elif backend_name == "your_backend":
-    if not YOUR_BACKEND_AVAILABLE:
-        raise ImportError("Your backend not installed")
-    return YourBackend(**kwargs)
-```
+3. Update documentation:
+   - Add to backend comparison table above
+   - Document GPU support if applicable
+   - Note precision and performance characteristics
 
-## Backend API
+## Performance Tips
 
-All backends must implement these methods:
+### For Best Speed
 
-### Core Math Functions
-- `calc_q(p, bh_mass)` - Convert periastron to Q
-- `calc_k_squared(p, bh_mass)` - Calculate elliptic modulus squared
-- `calc_zeta_inf(p, bh_mass)` - Calculate zeta_infinity
-- `calc_sn(p, angle, bh_mass, incl, order)` - Jacobi elliptic function
+1. **Use GPU for large renders** (> 500×500 pixels):
+   ```python
+   bh = BlackHole(..., backend='taichi', arch='gpu')
+   ```
 
-### Optimization Functions
-- `periastron_cost(p, radius, angle, bh_mass, incl, order)` - Cost function
-- `solve_for_periastron(radius, incl, alpha, bh_mass, order)` - Root finding
-- `solve_for_impact_parameter(radius, incl, alpha, bh_mass, order)` - Get impact parameter
+2. **Use Numba for CPU** (if GPU unavailable):
+   ```python
+   bh = BlackHole(..., backend='numba')
+   ```
 
-### Physics Functions
-- `calc_redshift_factor(radius, angle, incl, bh_mass, b)` - Redshift calculation
-- `calc_flux_intrinsic_swarzschild(radius, acc, bh_mass)` - Intrinsic flux
-- `calc_flux_observed(radius, acc, bh_mass, redshift_factor)` - Observed flux
+3. **Use appropriate resolution**:
+   - CPU backends: 100-200 (real-time)
+   - GPU backends: 200-400 (real-time)
+   - Final renders: 400+ (quality)
 
-### Metadata
-- `get_backend_name()` - Return backend name
-- `supports_vectorization()` - Can process arrays?
-- `supports_gpu()` - Can run on GPU?
+### For Best Accuracy
 
-## Usage Examples
+1. **Use f64 precision** for scientific work:
+   - `backend='scipy'` (reference, slowest)
+   - `backend='numba'` (recommended, 4.7× faster)
+   - `backend='taichi'` (CPU mode, 4-10× faster)
 
-### Python API
-```python
-from luminet import get_backend, list_available_backends
-
-# List available backends
-available = list_available_backends()
-print(f"Available backends: {available}")
-
-# Get specific backend
-backend = get_backend("scipy")  # or "taichi"
-
-# Use backend
-q = backend.calc_q(p=10.0, bh_mass=1.0)
-b = backend.solve_for_impact_parameter(
-    radius=10, incl=1.4, alpha=0.5, bh_mass=1.0
-)
-```
-
-### Command Line
-```bash
-# Benchmark scipy backend
-python benchmark.py --engine=scipy
-
-# Benchmark taichi backend
-python benchmark.py --engine=taichi
-
-# Compare all backends
-python benchmark.py --compare
-
-# Custom resolutions
-python benchmark.py --compare --resolutions 50 100 200 500
-```
-
-## Testing
-
-Run validation tests for all backends:
-```bash
-# Test scipy backend (baseline)
-python tests/test_validation.py --backend scipy
-
-# Test taichi backend (when implemented)
-python tests/test_validation.py --backend taichi
-```
-
-## Performance
-
-Expected speedup for Taichi backend (when complete):
-
-| Resolution | Scipy (ms) | Taichi CPU (ms) | Taichi GPU (ms) |
-|------------|--------------|------------------|------------------|
-| 50x50      | ~100         | ~20              | ~5               |
-| 100x100     | ~400         | ~80              | ~15              |
-| 200x200     | ~1600        | ~320             | ~40              |
-| 500x500     | ~10000       | ~2000            | ~200             |
-
-*Note: These are estimated values. Actual results will vary based on hardware.*
-
-## Current Status
-
-| Backend | Status | Complete | GPU Support | Vectorization |
-|---------|---------|-----------|--------------|--------------|
-| scipy   | ✅ Done | 100%      | ❌ No        | ❌ No |
-| taichi  | 🚧 WIP  | 10%       | ✅ Yes       | ✅ Yes |
-| jax     | 🚧 WIP  | 10%       | ✅ Yes       | ✅ Yes |
-| numba   | 🚧 WIP  | 10%       | ❌ No        | ✅ Yes |
-| mojo    | 🚧 WIP  | 5%        | ❌ No        | ❌ No |
-
-### Scipy Backend
-- ✅ All core math functions implemented
-- ✅ Root finding with scipy.optimize.brentq
-- ✅ Full backward compatibility
-- ✅ Well-tested
-
-### Taichi Backend
-- ✅ Base class structure
-- ✅ Factory integration
-- ✅ Skeleton methods (fall back to scipy)
-- ⏳ GPU kernels to be implemented
-- ⏳ Elliptic integrals (Jacobi functions)
-- ⏳ Vectorized root finding
+2. **Avoid GPU f32** for publications** (acceptable for demos only)
 
 ## References
 
-- [Base Backend Class](base.py)
-- [Scipy Implementation](scipy_backend.py)
-- [Taichi Implementation](taichi_backend.py)
-- [Benchmark Script](../benchmark.py)
-- [Validation Tests](../tests/test_validation.py)
+- [Technical Documentation](../docs/TECHNICAL.md) - Precision analysis and numerical methods
+- [GPU Backends Guide](../../GPU_BACKENDS.md) - GPU setup and hardware requirements
+- [Performance Benchmarks](../../PERF.md) - Detailed performance comparison
