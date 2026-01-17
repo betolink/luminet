@@ -84,7 +84,7 @@ Status:   ✅ WORKING
 
 **Test Results**:
 ```bash
-$ python test_gpu_final.py
+$ python tests/test_gpu_final.py
 ✅ Backend: vulkan, GPU: True, f64: False
 ✅ calc_q result: 5.744563 (error: 2.07e-08)
 ✅ BlackHole created successfully!
@@ -454,7 +454,7 @@ None of these are implemented currently. The **numba backend already provides ex
 
 ```bash
 # Verify GPU backend works
-python test_gpu_final.py
+python tests/test_gpu_final.py
 
 # Expected output:
 # ✅ Backend: cuda (or vulkan), GPU: True
@@ -466,10 +466,10 @@ python test_gpu_final.py
 
 ```bash
 # Test CPU backend accuracy
-python test_f32_accuracy.py
+python tests/test_f32_accuracy.py
 
 # Compare GPU f32 vs CPU f64 accuracy
-python test_gpu_accuracy.py
+python tests/test_gpu_accuracy.py
 ```
 
 Expected CPU accuracy:

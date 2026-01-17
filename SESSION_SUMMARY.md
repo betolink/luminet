@@ -147,7 +147,7 @@ python -c "import jax; print(jax.devices())"
 # Expected: [cuda(id=0)]
 
 # 2. Run tests
-python test_gpu_final.py
+python tests/test_gpu_final.py
 # Expected: "Architecture: cuda"
 
 # 3. Benchmark

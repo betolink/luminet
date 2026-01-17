@@ -73,7 +73,7 @@ def test_f64_transcendentals():
 ### ✅ All Tests Pass
 
 ```bash
-$ python test_gpu_final.py
+$ python tests/test_gpu_final.py
 ✅ Backend: vulkan, GPU: True, f64: False
 ✅ calc_q result: 5.744563
 ✅ BlackHole created successfully!

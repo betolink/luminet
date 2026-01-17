@@ -159,7 +159,7 @@ print('Taichi CUDA: initialized')
 ### 2. Backend Test (1 minute)
 
 ```bash
-python test_gpu_final.py
+python tests/test_gpu_final.py
 ```
 
 **Expected**: All tests pass, shows `Architecture: cuda`
@@ -260,7 +260,7 @@ print('CUDA initialized')
 
 **Test command after NVIDIA GPU installation**:
 ```bash
-python test_gpu_final.py && python benchmark_gpu.py
+python tests/test_gpu_final.py && python benchmark_gpu.py
 ```
 
 If both tests pass and show CUDA backend, you're good to go! 🚀
