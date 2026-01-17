@@ -31,7 +31,10 @@ def generate_rotation_frames(
     resolution: tuple = (1920, 1080),
     backend: str = 'taichi',
     hw: str = 'gpu',
-    fps: int = 30
+    fps: int = 30,
+    speed: float = 1.0,
+    color_scheme: str = 'flux',
+    bg_color: str = 'white'
 ):
     """Generate frames showing black hole rotation (varying inclination).
     
@@ -42,6 +45,9 @@ def generate_rotation_frames(
         backend: Computational backend ('scipy', 'taichi', etc.)
         hw: Hardware for taichi ('cpu' or 'gpu')
         fps: Target frames per second
+        speed: Animation speed multiplier (higher = faster rotation)
+        color_scheme: Color scheme ('flux', 'viridis', 'plasma', etc.)
+        bg_color: Background color ('white' or 'black')
     """
     output_dir.mkdir(parents=True, exist_ok=True)
     
@@ -53,9 +59,19 @@ def generate_rotation_frames(
         bhmath.set_backend(backend)
     
     # Inclination sweep: 0° to 90° (edge-on to face-on)
+    # Speed multiplier affects the angle range covered
     incl_min = 0.1  # Almost face-on (rad)
     incl_max = np.pi / 2 - 0.1  # Almost edge-on (rad)
-    inclinations = np.linspace(incl_min, incl_max, n_frames)
+    
+    # Adjust range based on speed (higher speed = larger angle change)
+    angle_range = (incl_max - incl_min) * speed
+    if angle_range > (incl_max - incl_min):
+        # Loop through multiple rotations
+        inclinations = np.linspace(incl_min, incl_min + angle_range, n_frames) % (incl_max - incl_min) + incl_min
+    else:
+        # Single sweep (partial or full)
+        incl_end = min(incl_min + angle_range, incl_max)
+        inclinations = np.linspace(incl_min, incl_end, n_frames)
     
     # Figure setup
     dpi = 100
@@ -77,16 +93,21 @@ def generate_rotation_frames(
             radial_resolution=200
         )
         
-        # Create figure with white background
-        fig, ax = plt.subplots(figsize=figsize, dpi=dpi, facecolor='white')
-        ax.set_facecolor('white')
+        # Create figure with specified background
+        fig, ax = plt.subplots(figsize=figsize, dpi=dpi, facecolor=bg_color)
+        ax.set_facecolor(bg_color)
         
-        # Plot black hole
-        bh.plot(ax=ax)
+        # Plot black hole with color scheme
+        if color_scheme == 'flux':
+            bh.plot(ax=ax)  # Default flux coloring
+        else:
+            # Use custom colormap
+            bh.plot(ax=ax, cmap=color_scheme)
         
-        # Add title with current angle
+        # Add title with current angle (text color contrasts with background)
+        title_color = 'black' if bg_color == 'white' else 'white'
         ax.set_title(f'Black Hole Inclination: {np.degrees(incl):.1f}°', 
-                     fontsize=16, color='black')
+                     fontsize=16, color=title_color)
         
         # Clean layout
         ax.set_aspect('equal')
@@ -95,7 +116,7 @@ def generate_rotation_frames(
         
         # Save frame
         frame_path = output_dir / f"frame_{i:04d}.png"
-        fig.savefig(frame_path, dpi=dpi, facecolor='white', edgecolor='none')
+        fig.savefig(frame_path, dpi=dpi, facecolor=bg_color, edgecolor='none')
         plt.close(fig)
     
     print(f"\n✅ Generated {n_frames} frames in {output_dir}")
@@ -108,7 +129,10 @@ def generate_orbit_frames(
     resolution: tuple = (1920, 1080),
     backend: str = 'taichi',
     hw: str = 'gpu',
-    fps: int = 30
+    fps: int = 30,
+    speed: float = 1.0,
+    color_scheme: str = 'flux',
+    bg_color: str = 'white'
 ):
     """Generate frames showing orbital rotation around black hole.
     
@@ -123,6 +147,9 @@ def generate_orbit_frames(
         backend: Computational backend
         hw: Hardware for taichi
         fps: Target frames per second
+        speed: Animation speed multiplier
+        color_scheme: Color scheme for black hole
+        bg_color: Background color
     """
     output_dir.mkdir(parents=True, exist_ok=True)
     
@@ -134,9 +161,10 @@ def generate_orbit_frames(
         bhmath.set_backend(backend)
     
     # Orbital motion: smooth sinusoidal variation
+    # Speed affects how many orbits are completed
     base_incl = 1.2  # Base viewing angle (rad)
     incl_variation = 0.3  # Variation amplitude
-    phases = np.linspace(0, 2 * np.pi, n_frames)
+    phases = np.linspace(0, 2 * np.pi * speed, n_frames)
     inclinations = base_incl + incl_variation * np.sin(phases)
     
     # Figure setup
@@ -157,21 +185,27 @@ def generate_orbit_frames(
             radial_resolution=200
         )
         
-        fig, ax = plt.subplots(figsize=figsize, dpi=dpi, facecolor='white')
-        ax.set_facecolor('white')
-        bh.plot(ax=ax)
+        fig, ax = plt.subplots(figsize=figsize, dpi=dpi, facecolor=bg_color)
+        ax.set_facecolor(bg_color)
+        
+        # Plot with color scheme
+        if color_scheme == 'flux':
+            bh.plot(ax=ax)
+        else:
+            bh.plot(ax=ax, cmap=color_scheme)
         
         # Add orbit progress indicator
-        progress = (i / n_frames) * 360
-        ax.set_title(f'Orbital Position: {progress:.0f}°', 
-                     fontsize=16, color='black')
+        progress = (i / n_frames) * 360 * speed
+        title_color = 'black' if bg_color == 'white' else 'white'
+        ax.set_title(f'Orbital Position: {progress % 360:.0f}°', 
+                     fontsize=16, color=title_color)
         
         ax.set_aspect('equal')
         ax.axis('off')
         fig.tight_layout(pad=0)
         
         frame_path = output_dir / f"frame_{i:04d}.png"
-        fig.savefig(frame_path, dpi=dpi, facecolor='white', edgecolor='none')
+        fig.savefig(frame_path, dpi=dpi, facecolor=bg_color, edgecolor='none')
         plt.close(fig)
     
     print(f"\n✅ Generated {n_frames} frames in {output_dir}")
@@ -184,7 +218,9 @@ def generate_zoom_frames(
     resolution: tuple = (1920, 1080),
     backend: str = 'taichi',
     hw: str = 'gpu',
-    fps: int = 30
+    fps: int = 30,
+    color_scheme: str = 'flux',
+    bg_color: str = 'white'
 ):
     """Generate frames showing zoom in/out on black hole.
     
@@ -195,6 +231,8 @@ def generate_zoom_frames(
         backend: Computational backend
         hw: Hardware for taichi
         fps: Target frames per second
+        color_scheme: Color scheme for black hole
+        bg_color: Background color
     """
     output_dir.mkdir(parents=True, exist_ok=True)
     
@@ -232,24 +270,30 @@ def generate_zoom_frames(
             radial_resolution=200
         )
         
-        fig, ax = plt.subplots(figsize=figsize, dpi=dpi, facecolor='white')
-        ax.set_facecolor('white')
-        bh.plot(ax=ax)
+        fig, ax = plt.subplots(figsize=figsize, dpi=dpi, facecolor=bg_color)
+        ax.set_facecolor(bg_color)
+        
+        # Plot with color scheme
+        if color_scheme == 'flux':
+            bh.plot(ax=ax)
+        else:
+            bh.plot(ax=ax, cmap=color_scheme)
         
         # Maintain consistent axis limits for smooth zoom
         max_extent = radius_max * 1.2
         ax.set_xlim(-max_extent, max_extent)
         ax.set_ylim(-max_extent, max_extent)
         
+        title_color = 'black' if bg_color == 'white' else 'white'
         ax.set_title(f'Disk Radius: {radius:.1f}M', 
-                     fontsize=16, color='black')
+                     fontsize=16, color=title_color)
         
         ax.set_aspect('equal')
         ax.axis('off')
         fig.tight_layout(pad=0)
         
         frame_path = output_dir / f"frame_{i:04d}.png"
-        fig.savefig(frame_path, dpi=dpi, facecolor='white', edgecolor='none')
+        fig.savefig(frame_path, dpi=dpi, facecolor=bg_color, edgecolor='none')
         plt.close(fig)
     
     print(f"\n✅ Generated {n_frames} frames in {output_dir}")
@@ -317,14 +361,25 @@ Examples:
   # Rotation animation (inclination sweep)
   python generate_video.py --type rotation --frames 60 --fps 30
   
+  # Faster rotation (2x speed)
+  python generate_video.py --type rotation --speed 2.0
+  
+  # Different color schemes
+  python generate_video.py --type rotation --color-scheme viridis
+  python generate_video.py --type rotation --color-scheme plasma
+  python generate_video.py --type rotation --color-scheme hot
+  
+  # Black background
+  python generate_video.py --type rotation --bg-color black
+  
   # Orbital animation (smooth orbit)
   python generate_video.py --type orbit --frames 120 --fps 30
   
   # Zoom animation
   python generate_video.py --type zoom --frames 60
   
-  # High quality 1080p with GPU
-  python generate_video.py --type rotation --resolution 1080p --backend taichi --hw gpu
+  # High quality 1080p with GPU and custom colors
+  python generate_video.py --type rotation --resolution 1080p --backend taichi --hw gpu --color-scheme inferno
   
   # Quick preview at 720p
   python generate_video.py --type rotation --frames 30 --resolution 720p --backend scipy
@@ -351,6 +406,16 @@ Examples:
                         help='Output video filename (default: auto-generated)')
     parser.add_argument('--keep-frames', action='store_true',
                         help='Keep individual frame images after creating video')
+    
+    # Animation control
+    parser.add_argument('--speed', type=float, default=1.0,
+                        help='Animation speed multiplier (default: 1.0, higher=faster rotation)')
+    parser.add_argument('--color-scheme', '--cmap', default='flux',
+                        choices=['flux', 'viridis', 'plasma', 'inferno', 'hot', 'cool', 'rainbow', 'jet', 'Greys_r'],
+                        help='Color scheme for black hole (default: flux)')
+    parser.add_argument('--bg-color', default='white',
+                        choices=['white', 'black'],
+                        help='Background color (default: white)')
     
     args = parser.parse_args()
     
@@ -379,13 +444,16 @@ Examples:
     
     if args.type == 'rotation':
         generate_rotation_frames(frames_dir, args.frames, resolution, 
-                                 args.backend, args.hw, args.fps)
+                                 args.backend, args.hw, args.fps,
+                                 args.speed, args.color_scheme, args.bg_color)
     elif args.type == 'orbit':
         generate_orbit_frames(frames_dir, args.frames, resolution,
-                              args.backend, args.hw, args.fps)
+                              args.backend, args.hw, args.fps,
+                              args.speed, args.color_scheme, args.bg_color)
     elif args.type == 'zoom':
         generate_zoom_frames(frames_dir, args.frames, resolution,
-                             args.backend, args.hw, args.fps)
+                             args.backend, args.hw, args.fps,
+                             args.color_scheme, args.bg_color)
     
     # Create video
     success = create_video_from_frames(frames_dir, output_video, args.fps)
