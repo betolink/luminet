@@ -77,15 +77,16 @@ def generate_rotation_frames(
             radial_resolution=200
         )
         
-        # Create figure
-        fig, ax = plt.subplots(figsize=figsize, dpi=dpi)
+        # Create figure with white background
+        fig, ax = plt.subplots(figsize=figsize, dpi=dpi, facecolor='white')
+        ax.set_facecolor('white')
         
         # Plot black hole
         bh.plot(ax=ax)
         
         # Add title with current angle
         ax.set_title(f'Black Hole Inclination: {np.degrees(incl):.1f}°', 
-                     fontsize=16, color='white')
+                     fontsize=16, color='black')
         
         # Clean layout
         ax.set_aspect('equal')
@@ -94,7 +95,7 @@ def generate_rotation_frames(
         
         # Save frame
         frame_path = output_dir / f"frame_{i:04d}.png"
-        fig.savefig(frame_path, dpi=dpi, facecolor='black', edgecolor='none')
+        fig.savefig(frame_path, dpi=dpi, facecolor='white', edgecolor='none')
         plt.close(fig)
     
     print(f"\n✅ Generated {n_frames} frames in {output_dir}")
@@ -156,20 +157,21 @@ def generate_orbit_frames(
             radial_resolution=200
         )
         
-        fig, ax = plt.subplots(figsize=figsize, dpi=dpi)
+        fig, ax = plt.subplots(figsize=figsize, dpi=dpi, facecolor='white')
+        ax.set_facecolor('white')
         bh.plot(ax=ax)
         
         # Add orbit progress indicator
         progress = (i / n_frames) * 360
         ax.set_title(f'Orbital Position: {progress:.0f}°', 
-                     fontsize=16, color='white')
+                     fontsize=16, color='black')
         
         ax.set_aspect('equal')
         ax.axis('off')
         fig.tight_layout(pad=0)
         
         frame_path = output_dir / f"frame_{i:04d}.png"
-        fig.savefig(frame_path, dpi=dpi, facecolor='black', edgecolor='none')
+        fig.savefig(frame_path, dpi=dpi, facecolor='white', edgecolor='none')
         plt.close(fig)
     
     print(f"\n✅ Generated {n_frames} frames in {output_dir}")
@@ -230,7 +232,8 @@ def generate_zoom_frames(
             radial_resolution=200
         )
         
-        fig, ax = plt.subplots(figsize=figsize, dpi=dpi)
+        fig, ax = plt.subplots(figsize=figsize, dpi=dpi, facecolor='white')
+        ax.set_facecolor('white')
         bh.plot(ax=ax)
         
         # Maintain consistent axis limits for smooth zoom
@@ -239,14 +242,14 @@ def generate_zoom_frames(
         ax.set_ylim(-max_extent, max_extent)
         
         ax.set_title(f'Disk Radius: {radius:.1f}M', 
-                     fontsize=16, color='white')
+                     fontsize=16, color='black')
         
         ax.set_aspect('equal')
         ax.axis('off')
         fig.tight_layout(pad=0)
         
         frame_path = output_dir / f"frame_{i:04d}.png"
-        fig.savefig(frame_path, dpi=dpi, facecolor='black', edgecolor='none')
+        fig.savefig(frame_path, dpi=dpi, facecolor='white', edgecolor='none')
         plt.close(fig)
     
     print(f"\n✅ Generated {n_frames} frames in {output_dir}")
@@ -351,9 +354,9 @@ Examples:
     
     args = parser.parse_args()
     
-    # Resolution mapping
+    # Resolution mapping (all dimensions must be even for h264)
     resolutions = {
-        '480p': (854, 480),
+        '480p': (854, 480),   # Standard 480p (16:9, even width)
         '720p': (1280, 720),
         '1080p': (1920, 1080),
         '1440p': (2560, 1440),
