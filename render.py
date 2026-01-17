@@ -20,8 +20,12 @@ Examples:
     # Accuracy comparison with debug output
     python render.py --backend=numba --debug --debug-file=stats.json
     
-    # GPU acceleration (experimental, CPU fallback if GPU fails)
+    # GPU acceleration (Taichi on NVIDIA CUDA or AMD Vulkan)
     python render.py --backend=taichi --hw=gpu --output=gpu.png
+    
+    # Specific GPU backend (cuda for NVIDIA, vulkan for AMD)
+    python render.py --backend=taichi --hw=cuda --output=nvidia.png
+    python render.py --backend=taichi --hw=vulkan --output=amd.png
     
     # Compare all backends (benchmark mode)
     python render.py --benchmark --output=benchmark.png
@@ -216,7 +220,8 @@ def main():
     parser.add_argument(
         '--hw',
         choices=['cpu', 'gpu', 'vulkan', 'cuda'],
-        help='Hardware architecture for taichi backend'
+        help='Hardware architecture for taichi backend: '
+             'gpu (auto-detect), cuda (NVIDIA), vulkan (AMD/Intel), cpu (default)'
     )
     
     # Black hole parameters
