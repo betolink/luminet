@@ -388,7 +388,7 @@ Examples:
     success = create_video_from_frames(frames_dir, output_video, args.fps)
     
     # Cleanup frames
-    if success and not args.keep-frames:
+    if success and not args.keep_frames:
         import shutil
         print(f"\nCleaning up frames in {frames_dir}...")
         shutil.rmtree(frames_dir)
