@@ -44,19 +44,7 @@ def colorline(ax, x, y, z, norm, cmap, linewidth=3, **kwargs):
     """
     cmap = plt.get_cmap(cmap)
     norm = plt.Normalize(*norm)
-    
-    # Check if axis uses polar projection
-    # If so, convert polar (theta, r) to Cartesian (x, y) for LineCollection
-    if hasattr(ax, 'name') and ax.name == 'polar':
-        # x is theta (angle), y is r (radius) in polar coordinates
-        theta = np.array(x)
-        r = np.array(y)
-        x_cart = r * np.cos(theta)
-        y_cart = r * np.sin(theta)
-        segments = make_segments(x_cart, y_cart)
-    else:
-        segments = make_segments(x, y)
-    
+    segments = make_segments(x, y)
     lc = mcoll.LineCollection(
         segments,
         cmap=cmap,

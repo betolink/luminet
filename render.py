@@ -237,10 +237,10 @@ def main():
     # Resolution
     parser.add_argument('--resolution', type=int, default=200,
                        help='Resolution NxN (default: 200)')
-    parser.add_argument('--angular-res', type=int, default=None,
-                       help='Angular resolution (default: same as --resolution)')
-    parser.add_argument('--radial-res', type=int, default=None,
-                       help='Radial resolution (default: same as --resolution)')
+    parser.add_argument('--angular-res', type=int, default=200,
+                       help='Angular resolution (default: 200, use 400+ for smoothness)')
+    parser.add_argument('--radial-res', type=int, default=400,
+                       help='Radial resolution (default: 400, increase to reduce color banding)')
     
     # Output
     parser.add_argument('--output', '--out', default='blackhole.png',
@@ -389,21 +389,16 @@ def main():
     
     start_render = time.time()
     
-    # Create figure with polar projection for black hole visualization
-    fig, ax = plt.subplots(subplot_kw={'projection': 'polar'})
+    # Plot with color scheme - let bh.plot() create its own polar axis
+    if args.color_scheme == 'flux':
+        ax = bh.plot()
+    else:
+        ax = bh.plot(cmap=args.color_scheme)
+    
+    # Get the figure and set background color
+    fig = plt.gcf()
     fig.patch.set_facecolor(args.bg_color)
     ax.set_facecolor(args.bg_color)
-    
-    # Plot with color scheme
-    if args.color_scheme == 'flux':
-        bh.plot(ax=ax)
-    else:
-        bh.plot(ax=ax, cmap=args.color_scheme)
-    
-    # Clean layout
-    ax.set_aspect('equal')
-    ax.axis('off')
-    fig.tight_layout(pad=0)
     
     render_time = time.time() - start_render
     

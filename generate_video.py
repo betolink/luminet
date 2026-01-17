@@ -34,7 +34,9 @@ def generate_rotation_frames(
     fps: int = 30,
     speed: float = 1.0,
     color_scheme: str = 'flux',
-    bg_color: str = 'white'
+    bg_color: str = 'white',
+    radial_res: int = 400,
+    angular_res: int = 200
 ):
     """Generate frames showing black hole rotation (varying inclination).
     
@@ -89,21 +91,23 @@ def generate_rotation_frames(
             incl=incl,
             acc=1.0,
             outer_edge=20.0,
-            angular_resolution=200,
-            radial_resolution=200
+            radial_resolution=radial_res,
+            angular_resolution=angular_res
         )
         
-        # Create figure with polar projection for black hole visualization
-        fig, ax = plt.subplots(figsize=figsize, dpi=dpi, facecolor=bg_color,
-                               subplot_kw={'projection': 'polar'})
-        ax.set_facecolor(bg_color)
-        
-        # Plot black hole with color scheme
+        # Plot black hole with color scheme - let bh.plot create its own polar axis
         if color_scheme == 'flux':
-            bh.plot(ax=ax)  # Default flux coloring
+            ax = bh.plot()  # Default flux coloring
         else:
             # Use custom colormap
-            bh.plot(ax=ax, cmap=color_scheme)
+            ax = bh.plot(cmap=color_scheme)
+        
+        # Get figure and set background colors
+        fig = plt.gcf()
+        fig.set_size_inches(figsize)
+        fig.set_dpi(dpi)
+        fig.patch.set_facecolor(bg_color)
+        ax.set_facecolor(bg_color)
         
         # Add title with current angle (text color contrasts with background)
         title_color = 'black' if bg_color == 'white' else 'white'
@@ -113,7 +117,6 @@ def generate_rotation_frames(
         # Clean layout
         ax.set_aspect('equal')
         ax.axis('off')
-        fig.tight_layout(pad=0)
         
         # Save frame
         frame_path = output_dir / f"frame_{i:04d}.png"
@@ -133,7 +136,9 @@ def generate_orbit_frames(
     fps: int = 30,
     speed: float = 1.0,
     color_scheme: str = 'flux',
-    bg_color: str = 'white'
+    bg_color: str = 'white',
+    radial_res: int = 400,
+    angular_res: int = 200
 ):
     """Generate frames showing orbital rotation around black hole.
     
@@ -182,19 +187,22 @@ def generate_orbit_frames(
             incl=incl,
             acc=1.0,
             outer_edge=20.0,
-            angular_resolution=200,
-            radial_resolution=200
+            radial_resolution=radial_res,
+            angular_resolution=angular_res
         )
         
-        fig, ax = plt.subplots(figsize=figsize, dpi=dpi, facecolor=bg_color,
-                               subplot_kw={'projection': 'polar'})
-        ax.set_facecolor(bg_color)
-        
-        # Plot with color scheme
+        # Plot with color scheme - let bh.plot create its own polar axis
         if color_scheme == 'flux':
-            bh.plot(ax=ax)
+            ax = bh.plot()
         else:
-            bh.plot(ax=ax, cmap=color_scheme)
+            ax = bh.plot(cmap=color_scheme)
+        
+        # Get figure and set background colors
+        fig = plt.gcf()
+        fig.set_size_inches(figsize)
+        fig.set_dpi(dpi)
+        fig.patch.set_facecolor(bg_color)
+        ax.set_facecolor(bg_color)
         
         # Add orbit progress indicator
         progress = (i / n_frames) * 360 * speed
@@ -204,7 +212,8 @@ def generate_orbit_frames(
         
         ax.set_aspect('equal')
         ax.axis('off')
-        fig.tight_layout(pad=0)
+        # Clean layout - remove padding for proper scaling
+        plt.subplots_adjust(left=0, right=1, top=1, bottom=0)
         
         frame_path = output_dir / f"frame_{i:04d}.png"
         fig.savefig(frame_path, dpi=dpi, facecolor=bg_color, edgecolor='none')
@@ -222,7 +231,9 @@ def generate_zoom_frames(
     hw: str = 'gpu',
     fps: int = 30,
     color_scheme: str = 'flux',
-    bg_color: str = 'white'
+    bg_color: str = 'white',
+    radial_res: int = 400,
+    angular_res: int = 200
 ):
     """Generate frames showing zoom in/out on black hole.
     
@@ -267,25 +278,26 @@ def generate_zoom_frames(
             mass=1.0,
             incl=1.4,
             acc=1.0,
-            outer_edge=radius,
-            angular_resolution=200,
-            radial_resolution=200
+            outer_edge=20.0,
+            radial_resolution=radial_res,
+            angular_resolution=angular_res
         )
         
-        fig, ax = plt.subplots(figsize=figsize, dpi=dpi, facecolor=bg_color,
-                               subplot_kw={'projection': 'polar'})
+        # Plot with color scheme - let bh.plot create its own polar axis
+        if color_scheme == 'flux':
+            ax = bh.plot()
+        else:
+            ax = bh.plot(cmap=color_scheme)
+        
+        # Get figure and set background colors
+        fig = plt.gcf()
+        fig.set_size_inches(figsize)
+        fig.set_dpi(dpi)
+        fig.patch.set_facecolor(bg_color)
         ax.set_facecolor(bg_color)
         
-        # Plot with color scheme
-        if color_scheme == 'flux':
-            bh.plot(ax=ax)
-        else:
-            bh.plot(ax=ax, cmap=color_scheme)
-        
-        # Maintain consistent axis limits for smooth zoom
-        max_extent = radius_max * 1.2
-        ax.set_xlim(-max_extent, max_extent)
-        ax.set_ylim(-max_extent, max_extent)
+        # Maintain consistent axis limits for smooth zoom (polar: radius only)
+        ax.set_ylim((0, radius_max * 1.2))
         
         title_color = 'black' if bg_color == 'white' else 'white'
         ax.set_title(f'Disk Radius: {radius:.1f}M', 
@@ -293,7 +305,8 @@ def generate_zoom_frames(
         
         ax.set_aspect('equal')
         ax.axis('off')
-        fig.tight_layout(pad=0)
+        # Clean layout - remove padding for proper scaling
+        plt.subplots_adjust(left=0, right=1, top=1, bottom=0)
         
         frame_path = output_dir / f"frame_{i:04d}.png"
         fig.savefig(frame_path, dpi=dpi, facecolor=bg_color, edgecolor='none')
@@ -399,6 +412,10 @@ Examples:
     parser.add_argument('--resolution', default='1080p',
                         choices=['480p', '720p', '1080p', '1440p', '4k'],
                         help='Output resolution (default: 1080p)')
+    parser.add_argument('--radial-res', type=int, default=400,
+                        help='Radial resolution for smoothness (default: 400)')
+    parser.add_argument('--angular-res', type=int, default=200,
+                        help='Angular resolution (default: 200)')
     parser.add_argument('--backend', default='taichi',
                         choices=['scipy', 'numba', 'taichi', 'jax'],
                         help='Computational backend (default: taichi)')
@@ -448,15 +465,18 @@ Examples:
     if args.type == 'rotation':
         generate_rotation_frames(frames_dir, args.frames, resolution, 
                                  args.backend, args.hw, args.fps,
-                                 args.speed, args.color_scheme, args.bg_color)
+                                 args.speed, args.color_scheme, args.bg_color,
+                                 args.radial_res, args.angular_res)
     elif args.type == 'orbit':
         generate_orbit_frames(frames_dir, args.frames, resolution,
-                              args.backend, args.hw, args.fps,
-                              args.speed, args.color_scheme, args.bg_color)
+                               args.backend, args.hw, args.fps,
+                               args.speed, args.color_scheme, args.bg_color,
+                               args.radial_res, args.angular_res)
     elif args.type == 'zoom':
         generate_zoom_frames(frames_dir, args.frames, resolution,
-                             args.backend, args.hw, args.fps,
-                             args.color_scheme, args.bg_color)
+                              args.backend, args.hw, args.fps,
+                              args.color_scheme, args.bg_color,
+                              args.radial_res, args.angular_res)
     
     # Create video
     success = create_video_from_frames(frames_dir, output_video, args.fps)
