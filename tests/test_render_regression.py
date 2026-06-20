@@ -20,7 +20,7 @@ def _render_small(backend, size=120, n_radius=80, n_angle=120, seed=None):
     """Render a tiny deterministic image with a given backend."""
     if seed is not None:
         np.random.seed(seed)
-    rgb, _ = render_raster(
+    rgb, _, _ = render_raster(
         mass=1.0, incl=np.radians(80.0), acc=1.0, outer_edge=30.0,
         size=size, n_radius=n_radius, n_angle=n_angle,
         orders=(0, 1), backend=backend, cmap="gray",
