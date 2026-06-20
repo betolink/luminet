@@ -45,6 +45,95 @@ from scipy.interpolate import RegularGridInterpolator
 import luminet.black_hole_math as bhmath
 
 
+# ---------------------------------------------------------------------------
+# Realism helpers: disk-space density noise, blackbody color, filmic tone-map
+# ---------------------------------------------------------------------------
+
+def _disk_noise(a_grid, r_grid, octaves=5, anisotropy=4.0, seed=0,
+                  direction="azimuthal"):
+    """Periodic, anisotropic fractal noise in *disk* coordinates (alpha, r).
+
+    The noise is generated in disk polar coordinates so that when it is
+    carried through the lensing map it is naturally distorted by spacetime
+    curvature (clumps get stretched around the photon sphere, etc.) -- this
+    is what makes the texture look physical rather than painted on the screen.
+
+    direction="azimuthal" suppresses high *alpha* frequencies relative to
+    radial ones, producing features elongated tangentially (differential-
+    rotation shear).  direction="radial" does the opposite: it suppresses high
+    *radial* frequencies, producing radially-stretched streaks -- the look of
+    matter streaming inward / spiralling into the hole at relativistic speed.
+
+    Returns an array of shape (len(a_grid), len(r_grid)) with values roughly
+    in [-1, 1] and no seam at alpha = 0/2*pi.
+    """
+    n_a, n_r = len(a_grid), len(r_grid)
+    rng = np.random.default_rng(seed)
+    # Complex white noise with random phase.
+    field = (rng.standard_normal((n_a, n_r))
+             + 1j * rng.standard_normal((n_a, n_r)))
+    spec = np.fft.fft2(field)
+    fa = np.fft.fftfreq(n_a)[:, None] * n_a     # cycles per full alpha turn
+    fr = np.fft.fftfreq(n_r)[None, :] * n_r     # cycles across r span
+    # 1/f^beta fractal spectrum.
+    beta = 2.0 + 0.4 * octaves
+    if direction == "radial":
+        # Stretch features along r: suppress high radial frequencies.
+        denom = 1.0 + fa ** 2 + (fr * anisotropy) ** 2
+    else:
+        # Stretch features along alpha (tangential): suppress high alpha freqs.
+        denom = 1.0 + (fa * anisotropy) ** 2 + fr ** 2
+    spec *= denom ** (-beta / 2.0)
+    # Low-pass the very highest frequencies (both axes) to avoid aliasing once
+    # the noise is lensed (the photon sphere magnifies small scales a lot).
+    spec *= np.exp(-(fr / (0.45 * n_r)) ** 2)
+    spec *= np.exp(-(fa / (0.45 * n_a)) ** 2)
+    noise = np.real(np.fft.ifft2(spec))
+    # Detrend each radial band so the lognormal modulation exp(amp*N) has no
+    # systematic azimuthal bias (which would otherwise amplify Doppler beaming
+    # one-sidedly and look like a camera artifact rather than disk texture).
+    noise -= noise.mean(axis=0, keepdims=True)
+    noise /= (np.abs(noise).max() + 1e-12)
+    return noise
+
+
+# Blackbody sRGB approximation (Tanner Helland), vectorized over T in Kelvin.
+_BB_COEFFS = np.array([
+    # (T breakpoint, R, G, B) -- piecewise-linear in log-T
+    (1000, 1.000, 0.392, 0.000),
+    (1500, 1.000, 0.566, 0.148),
+    (2000, 1.000, 0.685, 0.312),
+    (2500, 1.000, 0.761, 0.443),
+    (3000, 1.000, 0.817, 0.547),
+    (4000, 1.000, 0.880, 0.678),
+    (5000, 1.000, 0.913, 0.763),
+    (6000, 1.000, 0.937, 0.830),
+    (8000, 1.000, 0.964, 0.905),
+    (10000, 1.000, 0.977, 0.945),
+    (15000, 1.000, 0.991, 0.980),
+])
+_BB_T = _BB_COEFFS[:, 0]
+_BB_RGB = _BB_COEFFS[:, 1:]
+
+def _blackbody_rgb(T):
+    """sRGB color of a blackbody at temperature T (Kelvin), shape (..., 3)."""
+    T = np.clip(np.asarray(T, dtype=np.float64), 800.0, 40000.0)
+    rgb = np.empty(T.shape + (3,), dtype=np.float64)
+    for c in range(3):
+        rgb[..., c] = np.interp(T, _BB_T, _BB_RGB[:, c])
+    return rgb
+
+
+def _filmic(rgb_lin):
+    """ACES filmic approximate tone-map, per-channel. Input is linear HDR in
+    [0, inf); output is sRGB-ish [0, 1] with rolled-off highlights."""
+    a, b, c, d, e = 2.51, 0.03, 2.43, 0.59, 0.14
+    rgb_lin = np.clip(rgb_lin, 0.0, None)
+    num = rgb_lin * (a * rgb_lin + b)
+    den = rgb_lin * (c * rgb_lin + d) + e
+    return np.clip(num / den, 0.0, 1.0)
+
+
 def _forward_map(r_grid, a_grid, incl, M, order):
     """Compute b(r, alpha; order) on the polar grid.
 
@@ -59,15 +148,25 @@ def _forward_map(r_grid, a_grid, incl, M, order):
     return B
 
 
-def _invert_and_shade(B, r_grid, a_grid, b_grid, incl, M, acc):
+def _invert_and_shade(B, r_grid, a_grid, b_grid, incl, M, acc, noise=None,
+                      noise_amp=0.0, boost_ramp=None):
     """Invert b->r per alpha column and shade with observed flux.
 
-    Returns (F_polar, valid) of shape (len(a_grid), len(b_grid)).
-    F_polar is the observed flux; valid marks pixels with a real disk solution.
+    Returns (F_polar, R_polar, valid) of shape (len(a_grid), len(b_grid)).
+    F_polar is the observed flux, R_polar is the disk radius that emits it
+    (used downstream for blackbody coloring), and valid marks real solutions.
+
+    If ``noise`` (shape (n_a, n_r)) is given, the flux is multiplied by a
+    lognormal density modulation ``exp(amp * N)`` sampled in disk coordinates
+    so the texture is lensed with the geodesics rather than painted on screen.
+
+    If ``boost_ramp`` (shape (n_r,)) is given, the flux is additionally
+    scaled by that per-radius factor (inner-edge brightness ramp).
     """
     n_a, n_r = B.shape
     n_b = len(b_grid)
     F_polar = np.zeros((n_a, n_b), dtype=np.float64)
+    R_polar = np.zeros((n_a, n_b), dtype=np.float64)
     valid = np.zeros((n_a, n_b), dtype=bool)
 
     for j in range(n_a):
@@ -75,21 +174,27 @@ def _invert_and_shade(B, r_grid, a_grid, b_grid, incl, M, acc):
         good = np.isfinite(row) & (row > 0)
         if not np.any(good):
             continue
-        b_lo, b_hi = row[good].min(), row[good].max()
-        # b(r) is monotonic increasing in r -> np.interp inverts it.
-        # xp must be increasing; row[good] is increasing because b is monotonic.
         b_sort = row[good]
         r_sort = r_grid[good]
-        # in-range mask on the polar b grid
         in_range = (b_grid >= b_sort.min()) & (b_grid <= b_sort.max())
         r_of_b = np.interp(b_grid[in_range], b_sort, r_sort)
         a_col = a_grid[j]
         z = bhmath.calc_redshift_factor(r_of_b, a_col, incl, M, b_grid[in_range])
         F = bhmath.calc_flux_observed(r_of_b, acc, M, z)
         F = np.where(np.isfinite(F), F, 0.0)
-        F_polar[j, in_range] = np.clip(F, 0.0, None)
+        F = np.clip(F, 0.0, None)
+        if noise is not None and noise_amp > 0.0:
+            # Sample the disk-noise field at (alpha_j, r_of_b) -- a 1-D interp
+            # along r within this alpha column. r_grid is increasing (logspace).
+            n_col = np.interp(r_of_b, r_grid, noise[j])
+            F = F * np.exp(noise_amp * n_col)
+        if boost_ramp is not None:
+            # inner-edge brightness ramp, interpolated at r_of_b
+            F = F * np.interp(r_of_b, r_grid, boost_ramp)
+        F_polar[j, in_range] = F
+        R_polar[j, in_range] = r_of_b
         valid[j, in_range] = True
-    return F_polar, valid
+    return F_polar, R_polar, valid
 
 
 def render_raster(
@@ -107,27 +212,27 @@ def render_raster(
     gamma=0.45,
     percentile=99.5,
     bg_color="black",
+    texture="none",
+    noise_amp=0.7,
+    noise_octaves=5,
+    noise_anisotropy=4.0,
+    noise_direction="azimuthal",
+    noise_seed=0,
+    inner_boost=0.0,
+    color="cmap",
+    tone="gamma",
+    t_inner=9000.0,
+    exposure=1.0,
 ):
     """Render a filled black-hole image and return (rgb, stats).
 
-    Args:
-        mass: Black hole mass (G=c=1).
-        incl: Observer inclination in radians.
-        acc: Accretion rate.
-        outer_edge: Outer disk radius in units of M.
-        size: Output image side length in pixels.
-        n_radius: Number of disk radii in the forward-map grid.
-        n_angle: Number of disk azimuths in the forward-map grid.
-        n_b: Number of polar impact-parameter samples (default = size).
-        orders: Image orders to consider (0 = direct, 1 = first ghost).
-        backend: Computational backend for the lensing math.
-        cmap: Matplotlib colormap for display.
-        gamma: Tone-curve exponent applied to normalised intensity.
-        percentile: Percentile of the flux used as the display white-point.
-        bg_color: Background color around the disk.
-
-    Returns:
-        (rgb, stats) where rgb is a (size, size, 3) uint8 array.
+    Realism levers (each can be combined):
+      texture: 'none', 'noise' (isotropic-ish clumps), or 'infall'
+               (radially-streaked clumps = matter streaming inward).
+      inner_boost: extra brightness ramp toward the inner edge (r->r_in),
+                   modelling the real disk's sharp luminosity rise near ISCO.
+      color:   'cmap' (single colormap) or 'blackbody' (T(r) blackbody hues).
+      tone:    'gamma' (simple power) or 'filmic' (ACES highlight roll-off).
     """
     bhmath.set_backend(backend)
     M = float(mass)
@@ -147,32 +252,54 @@ def render_raster(
     b_max = 1.15 * outer
     b_grid = np.linspace(0.0, b_max, n_b)
 
+    # Disk-space density texture (lensed with the geodesics).
+    noise = None
+    if texture in ("noise", "infall"):
+        direction = "radial" if texture == "infall" else noise_direction
+        noise = _disk_noise(a_grid, r_grid, octaves=noise_octaves,
+                            anisotropy=noise_anisotropy, seed=noise_seed,
+                            direction=direction)
+
+    # Inner-edge brightness ramp (rises toward ISCO).  Computed in disk coords
+    # and applied with the flux so it is lensed consistently.
+    # u in [0,1]: 0 at outer edge, 1 at inner edge; ramp = 1 + boost*u^2.
+    r_norm = (np.log(outer) - np.log(r_grid)) / (np.log(outer) - np.log(inner))
+    boost_ramp = 1.0 + inner_boost * np.clip(r_norm, 0.0, 1.0) ** 2
+
     t0 = time.time()
     # Build the observed-flux field in polar coordinates for each order.
     F_orders = {}
+    R_orders = {}
     valid_orders = {}
     for order in orders:
         B = _forward_map(r_grid, a_grid, incl, M, order)
-        F_polar, valid = _invert_and_shade(
-            B, r_grid, a_grid, b_grid, incl, M, acc)
+        F_polar, R_polar, valid = _invert_and_shade(
+            B, r_grid, a_grid, b_grid, incl, M, acc,
+            noise=noise,
+            noise_amp=noise_amp if texture in ("noise", "infall") else 0.0,
+            boost_ramp=boost_ramp if inner_boost > 0.0 else None)
         F_orders[order] = F_polar
+        R_orders[order] = R_polar
         valid_orders[order] = valid
     t_solve = time.time() - t0
 
     # Occlusion by priority: direct (order 0) is in front of the ghost.
     # Take the lowest order that has a valid solution at each polar pixel.
     F_final = np.zeros_like(F_orders[orders[0]])
+    R_final = np.zeros_like(F_final)
     lit = np.zeros_like(F_final, dtype=bool)
     for order in orders:
         v = valid_orders[order]
         # only fill pixels not already claimed by a lower (front) order
         new = v & (~lit)
         F_final = np.where(new, F_orders[order], F_final)
+        R_final = np.where(new, R_orders[order], R_final)
         lit = lit | new
 
     # Wrap alpha: append the alpha=0 column as alpha=2*pi for the interpolator.
     a_grid_w = np.concatenate([a_grid, [2.0 * np.pi]])
     F_final_w = np.vstack([F_final, F_final[:1]])
+    R_final_w = np.vstack([R_final, R_final[:1]])
     lit_w = np.vstack([lit, lit[:1]])
 
     # Resample polar -> Cartesian pixel grid.
@@ -185,11 +312,15 @@ def render_raster(
     rgi_F = RegularGridInterpolator(
         (a_grid_w, b_grid), F_final_w,
         bounds_error=False, fill_value=0.0)
+    rgi_R = RegularGridInterpolator(
+        (a_grid_w, b_grid), R_final_w,
+        bounds_error=False, fill_value=0.0)
     rgi_lit = RegularGridInterpolator(
         (a_grid_w, b_grid), lit_w.astype(np.float64),
         bounds_error=False, fill_value=0.0)
     pts = np.stack([Apix.ravel(), Bpix.ravel()], axis=-1)
     flux_map = rgi_F(pts).reshape(size, size)
+    r_map = rgi_R(pts).reshape(size, size)
     lit_map = rgi_lit(pts).reshape(size, size) > 0.5
     t_resample = time.time() - t0 - t_solve
 
@@ -198,10 +329,27 @@ def render_raster(
     if finite.size == 0:
         raise RuntimeError("No flux landed in the image; check parameters.")
     white = np.percentile(finite, percentile)
-    img = np.clip(flux_map / white, 0.0, 1.0)
-    img = img ** gamma
-    cmap_obj = plt.get_cmap(cmap)
-    rgb = cmap_obj(img)[..., :3]
+    L = exposure * flux_map / white  # linear luminance, ~[0, exposure+]
+
+    if color == "blackbody":
+        # Spectral radiance ~ blackbody(T(r)) * bolometric flux.  T(r) follows
+        # the Shakura-Sunyaev profile T ~ r^(-3/4): white-hot inside, orange out.
+        T = t_inner * (np.where(r_map > 0, r_map / inner, 1.0)) ** (-0.75)
+        T = np.where(lit_map, T, 1.0)
+        bb = _blackbody_rgb(T)
+        rgb_lin = bb * L[..., None]
+        if tone == "filmic":
+            rgb = _filmic(rgb_lin)
+        else:
+            rgb = np.clip(rgb_lin, 0.0, 1.0) ** gamma
+    else:  # cmap
+        if tone == "filmic":
+            img = _filmic(L)
+        else:
+            img = np.clip(L, 0.0, 1.0) ** gamma
+        cmap_obj = plt.get_cmap(cmap)
+        rgb = cmap_obj(img)[..., :3]
+
     mask = lit_map
     if bg_color == "black":
         rgb = rgb * mask[..., None]
@@ -216,6 +364,9 @@ def render_raster(
         "flux_max": float(flux_map.max()),
         "flux_whitepoint": float(white),
         "lit_fraction": float(mask.mean()),
+        "texture": texture,
+        "color": color,
+        "tone": tone,
     }
     return rgb, stats
 
@@ -241,6 +392,30 @@ def main():
     p.add_argument("--gamma", type=float, default=0.45)
     p.add_argument("--percentile", type=float, default=99.5)
     p.add_argument("--bg-color", default="black", choices=["black", "white"])
+    # Realism levers
+    p.add_argument("--texture", default="none",
+                   choices=["none", "noise", "infall"],
+                   help="disk-space density: none, noise (clumps), infall "
+                        "(radial streaks = matter streaming inward)")
+    p.add_argument("--noise-amp", type=float, default=0.7,
+                   help="lognormal density modulation strength")
+    p.add_argument("--noise-octaves", type=int, default=5)
+    p.add_argument("--noise-anisotropy", type=float, default=4.0,
+                   help="stretch factor for the texture direction")
+    p.add_argument("--noise-direction", default="azimuthal",
+                   choices=["azimuthal", "radial"],
+                   help="stretch direction for --texture=noise")
+    p.add_argument("--noise-seed", type=int, default=0)
+    p.add_argument("--inner-boost", type=float, default=0.0,
+                   help="extra brightness ramp toward ISCO (try 1-3)")
+    p.add_argument("--color", default="cmap", choices=["cmap", "blackbody"],
+                   help="blackbody: T(r) hues (white-hot inside, orange out)")
+    p.add_argument("--tone", default="gamma", choices=["gamma", "filmic"],
+                   help="filmic: ACES highlight roll-off (less cartoonish)")
+    p.add_argument("--t-inner", type=float, default=9000.0,
+                   help="inner-disk blackbody temperature in K (color only)")
+    p.add_argument("--exposure", type=float, default=1.0,
+                   help="linear exposure before tone map (try 3-6 with filmic)")
     p.add_argument("--output", default="bh_raster.png")
     args = p.parse_args()
 
@@ -253,12 +428,18 @@ def main():
     print(f"  outer_edge={args.outer_edge}M  image={args.size}px  orders={orders}")
     print(f"  polar grid: {args.n_radius} radii x {args.n_angle} angles")
     print(f"  backend={args.backend}  cmap={args.cmap}  gamma={args.gamma}")
+    print(f"  texture={args.texture}  color={args.color}  tone={args.tone}")
 
     rgb, stats = render_raster(
         mass=args.mass, incl=incl, acc=args.accretion, outer_edge=args.outer_edge,
         size=args.size, n_radius=args.n_radius, n_angle=args.n_angle,
         n_b=args.n_b, orders=orders, backend=args.backend, cmap=args.cmap,
         gamma=args.gamma, percentile=args.percentile, bg_color=args.bg_color,
+        texture=args.texture, noise_amp=args.noise_amp,
+        noise_octaves=args.noise_octaves, noise_anisotropy=args.noise_anisotropy,
+        noise_direction=args.noise_direction, noise_seed=args.noise_seed,
+        inner_boost=args.inner_boost, color=args.color, tone=args.tone,
+        t_inner=args.t_inner, exposure=args.exposure,
     )
 
     plt.figure(figsize=(8, 8), dpi=120)
