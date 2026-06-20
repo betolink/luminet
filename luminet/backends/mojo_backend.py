@@ -61,7 +61,7 @@ class MojoBackend(BaseBackend):
             result[np.isnan(q)] = np.nan
             return result
         else:
-            if q is np.nan:
+            if not np.isfinite(q):
                 return np.nan
             return (q - p + 6 * bh_mass) / (2 * q)
 
@@ -74,7 +74,7 @@ class MojoBackend(BaseBackend):
             z_inf[np.isnan(arg)] = np.nan
             return z_inf
         else:
-            if q is np.nan:
+            if not np.isfinite(q):
                 return np.nan
             arg = (q - p + 2 * bh_mass) / (q - p + 6 * bh_mass)
             return np.arcsin(np.sqrt(arg))
@@ -88,7 +88,7 @@ class MojoBackend(BaseBackend):
         from scipy.special import ellipj, ellipk, ellipkinc
 
         q = self.calc_q(p, bh_mass)
-        if q is np.nan:
+        if not np.isfinite(q):
             return np.nan
 
         z_inf = self.calc_zeta_inf(p, bh_mass)
@@ -110,7 +110,7 @@ class MojoBackend(BaseBackend):
     def periastron_cost(self, p, radius, angle, bh_mass, incl, order=0):
         """Cost function for periastron optimization."""
         q = self.calc_q(p, bh_mass)
-        if q is np.nan:
+        if not np.isfinite(q):
             return np.nan
 
         sn = self.calc_sn(p, angle, bh_mass, incl, order)
@@ -166,7 +166,7 @@ class MojoBackend(BaseBackend):
 
         periastron_solution = self.solve_for_periastron(radius, incl, alpha, bh_mass, order)
 
-        if periastron_solution is np.nan:
+        if not np.isfinite(periastron_solution):
             if order == 0 and ((alpha < np.pi / 2) or (alpha > 3 * np.pi / 2)):
                 return self._ellipse(radius, alpha, incl)
             else:

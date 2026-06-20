@@ -21,7 +21,7 @@ def sample_photon(min_r, max_r, incl, bh_mass, n) -> Photon:
     # Evenly sampling
     # r = np.float64(min_r + (max_r - min_r) * np.random.random()**2)
     b = bhmath.solve_for_impact_parameter(r, incl, alpha, bh_mass, n)
-    if b is np.nan:
+    if not np.isfinite(b):
         raise ValueError(f"b is nan for r={r}, alpha={alpha}, incl={incl}, M={bh_mass}, n={n}")
 
     return Photon(radius=r, alpha=alpha, impact_parameter=b)

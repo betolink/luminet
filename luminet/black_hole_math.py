@@ -133,7 +133,7 @@ def calc_k(periastron: float, bh_mass: float) -> float:
 
     """
     q = calc_q(periastron, bh_mass)
-    if q is np.nan:
+    if not np.isfinite(q):
         return np.nan
     # WARNING: Paper has an error here. There should be brackets around the numerator.
     return np.sqrt((q - periastron + 6 * bh_mass) / (2 * q))
@@ -200,7 +200,7 @@ def calc_zeta_r(p: float, r: float, bh_mass: float) -> float:
         float: :math:`\zeta_r`
     """
     q = calc_q(p, bh_mass)
-    if q is np.nan:
+    if not np.isfinite(q):
         return np.nan
     a = (q - p + 2 * bh_mass + (4 * bh_mass * p) / r) / (
         q - p + (6 * bh_mass)
@@ -345,7 +345,7 @@ def periastron_optimization_function(
         float: Cost function value. Should be zero when the photon periastron value is correct.
     """
     q = calc_q(p, bh_mass)
-    if q is np.nan:
+    if not np.isfinite(q):
         return np.nan
     sn = calc_sn(p, ir_angle, bh_mass, incl, order)
     term1 = -(q - p + 2.0 * bh_mass)
@@ -402,7 +402,9 @@ def solve_for_periastron(
             for periastron_guess in periastron_initial_guess
         ]
     )
-    assert not any(np.isnan(y)), "Initial guess contains nan values"
+    # If the initial guesses produce NaN (e.g. p <= 2M edge cases) there is no valid orbit.
+    if any(np.isnan(y)):
+        return np.nan
 
     # If the solution is not in the initial range it likely doesnt exist for these input parameters
     # can happen for high inclinations and small radii -> photon orbits have P<3M, but the photon

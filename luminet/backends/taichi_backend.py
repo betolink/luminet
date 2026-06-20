@@ -963,18 +963,11 @@ class TaichiBackend(BaseBackend):
 
     def solve_for_periastron(self, radius, incl, alpha, bh_mass, order=0):
         """Solve for periastron given black hole coordinates.
-        
-        Uses GPU-accelerated bisection method.
+
+        Uses the same brentq-style root find as the scipy backend (via numpy)
+        for single-value calls, so results match scipy to machine precision.
+        Batched GPU solves go through :meth:`solve_for_impact_parameter`.
         """
-        # For single values, compute via impact parameter kernel
-        b = self.solve_for_impact_parameter(radius, incl, alpha, bh_mass, order)
-        if np.isnan(b):
-            return np.nan
-        # Back-calculate periastron from b
-        # b = sqrt(p^3 / (p - 2M))
-        # b^2 * (p - 2M) = p^3
-        # This is a cubic equation - for now use the direct method
-        # Just return the periastron from the internal calculation
         return self._solve_periastron_direct(radius, incl, alpha, bh_mass, order)
     
     def _solve_periastron_direct(self, radius, incl, alpha, bh_mass, order):
