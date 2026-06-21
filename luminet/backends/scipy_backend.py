@@ -166,10 +166,14 @@ class ScipyBackend(BaseBackend):
         f = A * (np.sqrt(r_) - np.sqrt(6) + (np.sqrt(3) / 2) * np.log(log_arg))
         return f
 
-    def calc_flux_observed(self, radius, acc, bh_mass, redshift_factor):
-        """Calculate observed flux with redshift correction."""
+    def calc_flux_observed(self, radius, acc, bh_mass, redshift_factor, exponent=4):
+        """Calculate observed flux with redshift correction.
+
+        exponent=4 -> bolometric flux (scientific default);
+        exponent=3 -> specific intensity / Doppler beaming (rendering).
+        """
         flux_intr = self.calc_flux_intrinsic_swarzschild(radius=radius, acc=acc, bh_mass=bh_mass)
-        flux_observed = flux_intr / redshift_factor**4
+        flux_observed = flux_intr / redshift_factor**exponent
         return flux_observed
 
     def get_backend_name(self) -> str:

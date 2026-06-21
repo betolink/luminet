@@ -346,10 +346,26 @@ def _forward_map(r_grid, a_grid, incl, M, order):
     """Compute b(r, alpha; order) on the polar grid.
 
     Returns B with shape (len(a_grid), len(r_grid)), monotonic increasing in r.
+
+    Vectorized when the backend supports arrays: builds the full
+    (n_a * n_r) coordinate arrays and calls the backend once, so numba
+    dispatches to its compiled array kernel and the Taichi backend launches a
+    single batched GPU kernel -- instead of a Python per-element loop (which is
+    ~200x slower on GPU due to kernel-launch overhead and is the main
+    bottleneck on CPU too).  Falls back to the loop for scalar-only backends
+    (e.g. scipy).
     """
-    B = np.empty((len(a_grid), len(r_grid)), dtype=np.float64)
+    n_a, n_r = len(a_grid), len(r_grid)
+    backend = bhmath.get_current_backend()
+    if getattr(backend, "vectorized", False):
+        RR, AA = np.meshgrid(r_grid, a_grid, indexing="xy")   # (n_a, n_r) each
+        bflat = bhmath.solve_for_impact_parameter(
+            RR.ravel(), incl, AA.ravel(), M, order)
+        B = np.asarray(bflat, dtype=np.float64).reshape(n_a, n_r)
+        return B
+    B = np.empty((n_a, n_r), dtype=np.float64)
     for j, alpha in enumerate(a_grid):
-        row = np.empty(len(r_grid))
+        row = np.empty(n_r)
         for i, r in enumerate(r_grid):
             row[i] = bhmath.solve_for_impact_parameter(r, incl, alpha, M, order)
         B[j] = row
@@ -358,7 +374,7 @@ def _forward_map(r_grid, a_grid, incl, M, order):
 
 def _invert_and_shade(B, r_grid, a_grid, b_grid, incl, M, acc, noise=None,
                       noise_amp=0.0, boost_ramp=None, stream=None,
-                      stream_scale=1.0, ridged=False):
+                      stream_scale=1.0, ridged=False, flux_exp=4):
     """Invert b->r per alpha column and shade with observed flux.
 
     Returns (F_polar, R_polar, valid) of shape (len(a_grid), len(b_grid)).
@@ -395,7 +411,7 @@ def _invert_and_shade(B, r_grid, a_grid, b_grid, incl, M, acc, noise=None,
         r_of_b = np.interp(b_grid[in_range], b_sort, r_sort)
         a_col = a_grid[j]
         z = bhmath.calc_redshift_factor(r_of_b, a_col, incl, M, b_grid[in_range])
-        F = bhmath.calc_flux_observed(r_of_b, acc, M, z)
+        F = bhmath.calc_flux_observed(r_of_b, acc, M, z, exponent=flux_exp)
         F = np.where(np.isfinite(F), F, 0.0)
         F = np.clip(F, 0.0, None)
         if noise is not None and noise_amp > 0.0:
@@ -442,6 +458,7 @@ def render_raster(
     gamma=0.45,
     percentile=99.5,
     bg_color="black",
+    backend_kwargs=None,
     texture="none",
     noise_amp=0.7,
     noise_octaves=5,
@@ -467,6 +484,7 @@ def render_raster(
     particle_flux_pow=1.0,
     stars=0,
     star_seed=2,
+    beaming=True,
 ):
     """Render a filled black-hole image and return (rgb, stats).
 
@@ -483,7 +501,7 @@ def render_raster(
       stream_*: a luminous donor stream feeding the disk at a given azimuth
                (modelled in disk coordinates so it lenses with the geodesics).
     """
-    bhmath.set_backend(backend)
+    bhmath.set_backend(backend, **(backend_kwargs or {}))
     M = float(mass)
     incl = float(incl)
     acc = float(acc)
@@ -491,6 +509,9 @@ def render_raster(
     outer = float(outer_edge)
     if n_b is None:
         n_b = size
+    # Observed-flux exponent: 3 for specific intensity / Doppler beaming
+    # (physically correct for image rendering), 4 for bolometric flux.
+    _exp = 3 if beaming else 4
 
     # Polar grids. Log-space r concentrates resolution near the bright inner
     # disk; alpha is periodic so we duplicate the 0 column at 2*pi for the
@@ -544,7 +565,7 @@ def render_raster(
             z_ref = bhmath.calc_redshift_factor(r_ref, 0.0, incl, M,
                                                 bhmath.solve_for_impact_parameter(
                                                     r_ref, incl, 0.0, M, 0))
-            stream_scale_eff = bhmath.calc_flux_observed(r_ref, acc, M, z_ref)
+            stream_scale_eff = bhmath.calc_flux_observed(r_ref, acc, M, z_ref, exponent=_exp)
         else:
             stream_scale_eff = stream_scale
 
@@ -562,7 +583,8 @@ def render_raster(
             noise_amp=noise_amp if texture in ("noise", "infall", "filament") else 0.0,
             boost_ramp=boost_ramp if inner_boost > 0.0 else None,
             stream=stream, stream_scale=stream_scale_eff,
-            ridged=(texture == "filament"))
+            ridged=(texture == "filament"),
+            flux_exp=_exp)
         F_orders[order] = F_polar
         R_orders[order] = R_polar
         Z_orders[order] = Z_polar
@@ -727,7 +749,8 @@ def render_raster(
         flux_r = np.array([
             bhmath.calc_flux_observed(ri, acc, M,
                 bhmath.calc_redshift_factor(ri, 0.0, incl, M,
-                    bhmath.solve_for_impact_parameter(ri, incl, 0.0, M, 0)))
+                    bhmath.solve_for_impact_parameter(ri, incl, 0.0, M, 0)),
+                exponent=_exp)
             for ri in r_grid])
         flux_r = np.where(np.isfinite(flux_r), flux_r, 0.0)
         pr, pa = _sample_particles(a_grid, r_grid, pnoise, flux_r,
@@ -736,15 +759,14 @@ def render_raster(
         # lens each particle (order 0 = direct, in front) and ghost (order 1)
         layers = []
         for order, size_scale, bright_scale in ((0, 1.0, 1.0), (1, 0.7, 0.45)):
-            pb = np.array([bhmath.solve_for_impact_parameter(pr[i], incl, pa[i],
-                                                             M, order)
-                           for i in range(len(pr))])
+            pb = np.asarray(bhmath.solve_for_impact_parameter(
+                pr, incl, pa, M, order))
             ok = np.isfinite(pb) & (pb > 0)
             if not np.any(ok):
                 continue
             r_ok = pr[ok]; a_ok = pa[ok]; b_ok = pb[ok]
             z_ok = bhmath.calc_redshift_factor(r_ok, a_ok, incl, M, b_ok)
-            fmag = np.clip(bhmath.calc_flux_observed(r_ok, acc, M, z_ok), 0, None)
+            fmag = np.clip(bhmath.calc_flux_observed(r_ok, acc, M, z_ok, exponent=_exp), 0, None)
             fmag_n = fmag / (np.percentile(fmag, 95) + 1e-30)
             color_mode = "blue" if palette == "blue" else color
             cols = _particle_colors(r_ok, z_ok, t_inner, inner, redshift_tint,
@@ -794,7 +816,12 @@ def main():
     p.add_argument("--n-b", type=int, default=None)
     p.add_argument("--orders", default="0,1",
                    help="comma list of image orders (front-to-back priority)")
-    p.add_argument("--backend", default="numba")
+    p.add_argument("--backend", default="numba",
+                   help="computational backend (numba, scipy, taichi)")
+    p.add_argument("--hw", default=None,
+                   choices=["cpu", "gpu", "vulkan", "cuda"],
+                   help="hardware arch for taichi (vulkan for AMD/Intel, cuda "
+                        "for NVIDIA); GPU is fast but f32 (preview quality)")
     p.add_argument("--cmap", default="inferno")
     p.add_argument("--gamma", type=float, default=0.45)
     p.add_argument("--percentile", type=float, default=99.5)
@@ -853,6 +880,11 @@ def main():
     p.add_argument("--stars", type=int, default=0,
                    help="number of background stars (try 1500-4000; 0 = off)")
     p.add_argument("--star-seed", type=int, default=2)
+    p.add_argument("--beaming", action="store_true", default=True,
+                   help="use specific-intensity Doppler beaming (1+z)^-3 "
+                        "(physically correct for rendering; default on)")
+    p.add_argument("--no-beaming", dest="beaming", action="store_false",
+                   help="use bolometric flux (1+z)^-4 (scientific default)")
     p.add_argument("--output", default="bh_raster.png")
     args = p.parse_args()
 
@@ -870,7 +902,9 @@ def main():
     rgb, stats, particle_layer = render_raster(
         mass=args.mass, incl=incl, acc=args.accretion, outer_edge=args.outer_edge,
         size=args.size, n_radius=args.n_radius, n_angle=args.n_angle,
-        n_b=args.n_b, orders=orders, backend=args.backend, cmap=args.cmap,
+        n_b=args.n_b, orders=orders, backend=args.backend,
+        backend_kwargs=( {"arch": args.hw} if (args.backend == "taichi" and args.hw) else {}),
+        cmap=args.cmap,
         gamma=args.gamma, percentile=args.percentile, bg_color=args.bg_color,
         texture=args.texture, noise_amp=args.noise_amp,
         noise_octaves=args.noise_octaves, noise_anisotropy=args.noise_anisotropy,
@@ -891,6 +925,7 @@ def main():
         particle_flux_pow=args.particle_flux_pow,
         stars=args.stars,
         star_seed=args.star_seed,
+        beaming=args.beaming,
     )
 
     plt.figure(figsize=(8, 8), dpi=120)

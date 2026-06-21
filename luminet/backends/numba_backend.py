@@ -583,10 +583,14 @@ class NumbaBackend(BaseBackend):
             )
         return _calc_flux_intrinsic_scalar(float(radius), float(acc), float(bh_mass))
 
-    def calc_flux_observed(self, radius, acc, bh_mass, redshift_factor):
-        """Calculate observed flux with redshift correction."""
+    def calc_flux_observed(self, radius, acc, bh_mass, redshift_factor, exponent=4):
+        """Calculate observed flux with redshift correction.
+
+        exponent=4 -> bolometric flux (scientific default);
+        exponent=3 -> specific intensity / Doppler beaming (rendering).
+        """
         flux_intr = self.calc_flux_intrinsic_swarzschild(radius, acc, bh_mass)
-        return flux_intr / (np.asarray(redshift_factor) ** 4)
+        return flux_intr / (np.asarray(redshift_factor) ** exponent)
 
     def get_backend_name(self) -> str:
         """Get the name of this backend."""

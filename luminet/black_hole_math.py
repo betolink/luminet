@@ -726,24 +726,35 @@ def calc_flux_intrinsic_swarzschild(bh_mass, r, acc):
     return f
 
 
-def calc_flux_observed(r, acc, bh_mass, redshift_factor):
-    r"""Calculate the observed bolometric flux of a photon :math:`F_o`
+def calc_flux_observed(r, acc, bh_mass, redshift_factor, exponent=4):
+    r"""Calculate the observed flux of a photon :math:`F_o`.
 
-    .. math::
+    By default returns the *bolometric* observed flux
+    :math:`F_o = F_s / (1+z)^4` (Luminet 1979, Eq. 16), which is the total
+    energy flux integrated over all frequencies.
 
-        F_o = \frac{F_s}{(1 + z)^4}
+    For **image rendering** (specific intensity per pixel) pass ``exponent=3``:
+    Liouville's theorem gives :math:`I_\nu / \nu^3` as a Lorentz invariant, so
+    the observed specific intensity is :math:`I_{obs} = I_{emit} / (1+z)^3`.
+    The third power also equals the relativistic Doppler-beaming factor
+    :math:`\delta^3` for a Keplerian orbit, since :math:`\delta = 1/(1+z)`
+    here -- so ``exponent=3`` correctly sharpens the approaching/receding
+    asymmetry (beaming) without the extra bandwidth factor that the bolometric
+    ``-4`` carries.
     
     Args:
         r (float): radius on the accretion disk (BH frame)
         acc (float): accretion rate
         bh_mass (float): mass of the black hole
-        redshift_factor (float): gravitational redshift factor
+        redshift_factor (float): gravitational redshift factor (1+z)
+        exponent (int): 4 for bolometric flux (default, scientific),
+                        3 for specific intensity / Doppler beaming (rendering).
 
     Returns:
         float: Observed flux of the photon :math:`F_o`
     """
     flux_intr = calc_flux_intrinsic_swarzschild(r=r, acc=acc, bh_mass=bh_mass)
-    flux_observed = flux_intr / redshift_factor**4
+    flux_observed = flux_intr / redshift_factor**exponent
     return flux_observed
 
 
