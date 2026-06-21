@@ -168,20 +168,22 @@ def _bluewhite_rgb(t):
     return rgb
 
 
-def _sample_particles(a_grid, r_grid, noise, flux_r, n_particles, seed=0):
+def _sample_particles(a_grid, r_grid, noise, flux_r, n_particles, seed=0,
+                      flux_pow=1.0):
     """Sample disk-space particles concentrated on bright ridges x flux.
 
     Particles are drawn with probability density proportional to
-    ``max(0, noise)^2 * flux(r)`` so they cluster on the bright filament ridges
-    and where the disk is luminous (inner disk), giving discrete strand-like
-    points instead of a uniform scatter.  Returns arrays (r, alpha) of length
-    ~n_particles (rejection sampling -> approximate count).
+    ``max(0, noise)^2 * flux(r)^flux_pow`` so they cluster on the bright
+    filament ridges and where the disk is luminous.  ``flux_pow < 1`` flattens
+    the radial profile so the faint outer disk gets more particles (otherwise
+    the outer edge looks like a solid band with few particles on it).
+    Returns arrays (r, alpha) of length ~n_particles.
     """
     rng = np.random.default_rng(seed)
     n_a, n_r = noise.shape
     # Density field on the polar grid (>= 0).
     dens = np.clip(noise, 0.0, None) ** 2
-    dens = dens * flux_r[None, :]
+    dens = dens * (flux_r[None, :] ** flux_pow)
     dens /= dens.sum() + 1e-30
     # Inverse-CDF sampling on the flattened grid.
     flat = dens.ravel()
@@ -220,6 +222,79 @@ def _particle_colors(r, z_factor, t_inner, inner, redshift_tint,
         dz = np.clip(((z_factor - 1.0) / redshift_tint) ** 6, 0.0, 1.0)
         red = np.array([1.0, 0.30, 0.20])
         rgb = rgb * (1.0 - dz[:, None]) + red * dz[:, None]
+    return rgb
+
+
+def _star_field(nx, ny, n_stars, seed=0, brightest_sigma=2.0,
+                color_temp_mix=0.4, spike_frac=0.02):
+    """A simple but realistic-looking star field as an RGB image (ny, nx, 3).
+
+    Realism levers (all cheap, no shaders):
+      - power-law brightness distribution (many faint, few bright), like real
+        star counts on a photographic plate;
+      - tiny Gaussian PSF for faint stars, larger bloom only for the few bright;
+      - faint color-temperature variation (blue-white / white / yellow / red)
+        mixed with white by ``color_temp_mix``;
+      - optional diffraction spikes on the brightest few stars.
+
+    Returns float RGB in [0, 1].  Most stars are sub-pixel points; only the
+    bright tail blooms, so the field reads as black sky + pinpoint stars.
+    """
+    rng = np.random.default_rng(seed)
+    rgb = np.zeros((ny, nx, 3), dtype=np.float64)
+    if n_stars <= 0:
+        return rgb
+    px = rng.integers(0, nx, n_stars)
+    py = rng.integers(0, ny, n_stars)
+    # brightness: power-law -> almost all faint pinpoints, a few bright.
+    # Faint stars are barely-visible single pixels; only the bright tail blooms.
+    u = rng.random(n_stars)
+    mag = u ** 6.0                          # very skewed toward faint
+    bright = rng.random(n_stars) < 0.02    # ~2% bright enough to bloom
+    mag = np.where(bright, 0.55 + 0.45 * rng.random(n_stars), mag)
+    # color buckets
+    buckets = np.array([[0.75, 0.85, 1.00],   # hot blue-white
+                        [1.00, 1.00, 1.00],   # white
+                        [1.00, 0.95, 0.80],   # yellow-white
+                        [1.00, 0.80, 0.60]])  # orange-red
+    bidx = rng.integers(0, len(buckets), n_stars)
+    cols = buckets[bidx]
+    cols = (1.0 - color_temp_mix) * np.ones_like(cols) + color_temp_mix * cols
+
+    yy, xx = np.indices((ny, nx))
+    for i in range(n_stars):
+        m = float(mag[i])
+        if m < 0.55:
+            # faint star: a near-point, very low amplitude so the sky stays dark
+            amp = 0.02 + 0.18 * m           # 0.02..0.12 peak -> pinpoints
+            rad = 1                            # 3x3 footprint
+            x0 = max(0, int(px[i] - rad)); x1 = min(nx, int(px[i] + rad + 1))
+            y0 = max(0, int(py[i] - rad)); y1 = min(ny, int(py[i] + rad + 1))
+            sub_r2 = (xx[y0:y1, x0:x1] - px[i]) ** 2 + (yy[y0:y1, x0:x1] - py[i]) ** 2
+            psf = amp * np.exp(-0.5 * sub_r2 / 0.5)
+            for c in range(3):
+                rgb[y0:y1, x0:x1, c] += psf * cols[i, c]
+        else:
+            # bright star: a small Gaussian bloom + diffraction spikes.
+            # Confined to a local window so 30 bright stars don't flood the frame.
+            sigma = 0.8 + brightest_sigma * (m - 0.55)
+            amp = 0.4 + 0.6 * m
+            rad = int(np.ceil(sigma * 5.0))
+            x0 = max(0, int(px[i] - rad)); x1 = min(nx, int(px[i] + rad + 1))
+            y0 = max(0, int(py[i] - rad)); y1 = min(ny, int(py[i] + rad + 1))
+            sub_xx = xx[y0:y1, x0:x1]; sub_yy = yy[y0:y1, x0:x1]
+            r2 = (sub_xx - px[i]) ** 2 + (sub_yy - py[i]) ** 2
+            psf = amp * np.exp(-0.5 * r2 / (sigma ** 2))
+            for c in range(3):
+                rgb[y0:y1, x0:x1, c] += psf * cols[i, c]
+            if rng.random() < spike_frac / 0.02:
+                dx = np.abs(sub_xx - px[i]); dy = np.abs(sub_yy - py[i])
+                spike = amp * 0.4 * np.exp(-(np.minimum(dx, dy) ** 2) /
+                                           (2.0 * (sigma * 5.0) ** 2))
+                spike *= (np.minimum(dx, dy) < sigma * 8.0)
+                for c in range(3):
+                    rgb[y0:y1, x0:x1, c] += spike * cols[i, c]
+    rgb = np.clip(rgb, 0.0, 1.0)
     return rgb
 
 
@@ -389,6 +464,9 @@ def render_raster(
     particle_size=0.8,
     particle_brightness=1.0,
     particle_seed=1,
+    particle_flux_pow=1.0,
+    stars=0,
+    star_seed=2,
 ):
     """Render a filled black-hole image and return (rgb, stats).
 
@@ -626,6 +704,15 @@ def render_raster(
     else:
         rgb = rgb * mask[..., None] + (1.0 - mask[..., None])
 
+    # ---- Star field background (simple realistic look, no shaders) ---------
+    # Generated to match the (possibly non-square) canvas and composited only
+    # where the disk/stream is not lit, so stars peek through around the hole.
+    if stars > 0:
+        star = _star_field(nx, ny, n_stars=stars, seed=star_seed)
+        # composite stars behind the disk: stars show where disk is dark
+        bg_mask = (1.0 - mask.astype(np.float64))[..., None]
+        rgb = rgb + star[..., :3] * bg_mask
+
     # ---- Particle overlay (discrete filament points on the smooth base) -----
     # Particles are sampled in disk space, lensed to the screen, and colored by
     # blackbody T(r) with a redshift red-tint on receding matter.  They cluster
@@ -644,7 +731,8 @@ def render_raster(
             for ri in r_grid])
         flux_r = np.where(np.isfinite(flux_r), flux_r, 0.0)
         pr, pa = _sample_particles(a_grid, r_grid, pnoise, flux_r,
-                                    n_particles=particles, seed=particle_seed)
+                                    n_particles=particles, seed=particle_seed,
+                                    flux_pow=particle_flux_pow)
         # lens each particle (order 0 = direct, in front) and ghost (order 1)
         layers = []
         for order, size_scale, bright_scale in ((0, 1.0, 1.0), (1, 0.7, 0.45)):
@@ -759,6 +847,12 @@ def main():
     p.add_argument("--particle-brightness", type=float, default=1.0,
                    help="particle alpha/brightness scale")
     p.add_argument("--particle-seed", type=int, default=1)
+    p.add_argument("--particle-flux-pow", type=float, default=1.0,
+                   help="radial density flattening for particles: <1 puts more "
+                        "particles in the faint outer disk (try 0.3-0.6)")
+    p.add_argument("--stars", type=int, default=0,
+                   help="number of background stars (try 1500-4000; 0 = off)")
+    p.add_argument("--star-seed", type=int, default=2)
     p.add_argument("--output", default="bh_raster.png")
     args = p.parse_args()
 
@@ -794,6 +888,9 @@ def main():
         particle_size=args.particle_size,
         particle_brightness=args.particle_brightness,
         particle_seed=args.particle_seed,
+        particle_flux_pow=args.particle_flux_pow,
+        stars=args.stars,
+        star_seed=args.star_seed,
     )
 
     plt.figure(figsize=(8, 8), dpi=120)
