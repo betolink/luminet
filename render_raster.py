@@ -168,6 +168,68 @@ def _bluewhite_rgb(t):
     return rgb
 
 
+def _gaussian_psf(x, y, sigma, fwhm=None):
+    """Gaussian point spread function for camera optics.
+
+    Models the blurring effect of a real telescope's optics on point sources.
+    The PSF is a 2D Gaussian with sigma controlling the width.
+
+    Args:
+        x, y: Screen coordinates of the source point.
+        sigma: Standard deviation of the Gaussian (pixels).
+        fwhm: Full width at half maximum. If given, overrides sigma.
+
+    Returns:
+        2D Gaussian kernel, normalized to integrate to 1.
+    """
+    if fwhm is not None:
+        sigma = fwhm / (2.0 * np.sqrt(2.0 * np.log(2.0)))
+    # Normalize: a 2D Gaussian with sigma has integral = 2*pi*sigma^2
+    # So we divide by 2*pi*sigma^2 to normalize to 1
+    norm = 2.0 * np.pi * sigma**2
+    return np.exp(-0.5 * ((x / sigma) ** 2 + (y / sigma) ** 2)) / norm
+
+
+def _apply_psf(image, sigma=None, fwhm=None, kernel_size=None):
+    """Apply a Gaussian PSF to an image via convolution.
+
+    Args:
+        image: 2D or 3D array (ny, nx) or (ny, nx, channels).
+        sigma: PSF width in pixels (standard deviation).
+        fwhm: Full width at half maximum. If given, overrides sigma.
+        kernel_size: Size of the convolution kernel. If None, auto-compute.
+
+    Returns:
+        Blurred image (same shape as input).
+    """
+    if fwhm is not None:
+        sigma = fwhm / (2.0 * np.sqrt(2.0 * np.log(2.0)))
+    if kernel_size is None:
+        kernel_size = max(int(6 * sigma) + 1, 3)
+        kernel_size = kernel_size - (kernel_size % 2)  # make odd
+    kernel_size = min(kernel_size, image.shape[0] - 1, image.shape[1] - 1)
+    if kernel_size < 1:
+        return image.copy()
+    # Build kernel
+    coords = np.mgrid[-kernel_size // 2:kernel_size // 2 + 1,
+                      -kernel_size // 2:kernel_size // 2 + 1]
+    kernel = _gaussian_psf(coords[1], coords[0], sigma)
+    kernel /= kernel.sum()
+    # Handle RGB images: apply PSF per channel
+    if image.ndim == 3:
+        from scipy.signal import convolve2d
+        result = np.empty_like(image)
+        for c in range(image.shape[2]):
+            img_norm = image[:, :, c] / (image[:, :, c].max() + 1e-30)
+            result[:, :, c] = convolve2d(img_norm, kernel, mode='same', boundary='symm') * image[:, :, c].max()
+        return result
+    # Handle grayscale images
+    img_norm = image / (image.max() + 1e-30)
+    from scipy.signal import convolve2d
+    result = convolve2d(img_norm, kernel, mode='same', boundary='symm')
+    return result * image.max()
+
+
 def _sample_particles(a_grid, r_grid, noise, flux_r, n_particles, seed=0,
                       flux_pow=1.0):
     """Sample disk-space particles concentrated on bright ridges x flux.
@@ -372,8 +434,8 @@ def _forward_map(r_grid, a_grid, incl, M, order):
     return B
 
 
-def _invert_and_shade(B, r_grid, a_grid, b_grid, incl, M, acc, noise=None,
-                      noise_amp=0.0, boost_ramp=None, stream=None,
+def _invert_and_shade(B, r_grid, a_grid, b_grid, incl, M, acc, kerr=False, spin=0.0,
+                      noise=None, noise_amp=0.0, boost_ramp=None, stream=None,
                       stream_scale=1.0, ridged=False, flux_exp=4):
     """Invert b->r per alpha column and shade with observed flux.
 
@@ -411,7 +473,11 @@ def _invert_and_shade(B, r_grid, a_grid, b_grid, incl, M, acc, noise=None,
         r_of_b = np.interp(b_grid[in_range], b_sort, r_sort)
         a_col = a_grid[j]
         z = bhmath.calc_redshift_factor(r_of_b, a_col, incl, M, b_grid[in_range])
-        F = bhmath.calc_flux_observed(r_of_b, acc, M, z, exponent=flux_exp)
+        # Use Kerr flux calculation if Kerr black hole is enabled
+        if kerr:
+            F = bhmath.calc_flux_observed_kerr(r_of_b, acc, M, spin, z, exponent=flux_exp)
+        else:
+            F = bhmath.calc_flux_observed(r_of_b, acc, M, z, exponent=flux_exp)
         F = np.where(np.isfinite(F), F, 0.0)
         F = np.clip(F, 0.0, None)
         if noise is not None and noise_amp > 0.0:
@@ -485,6 +551,10 @@ def render_raster(
     stars=0,
     star_seed=2,
     beaming=True,
+    psf_fwhm=0.0,
+    psf_kernel_size=None,
+    kerr=False,
+    spin=0.0,
 ):
     """Render a filled black-hole image and return (rgb, stats).
 
@@ -505,7 +575,11 @@ def render_raster(
     M = float(mass)
     incl = float(incl)
     acc = float(acc)
-    inner = 6.0 * M
+    # Inner edge: ISCO for Schwarzschild (6M) or Kerr (depends on spin)
+    if kerr:
+        inner = bhmath.calc_innermost_stable_orbit(bh_mass=M, a=spin)
+    else:
+        inner = 6.0 * M
     outer = float(outer_edge)
     if n_b is None:
         n_b = size
@@ -578,7 +652,7 @@ def render_raster(
     for order in orders:
         B = _forward_map(r_grid, a_grid, incl, M, order)
         F_polar, R_polar, Z_polar, valid = _invert_and_shade(
-            B, r_grid, a_grid, b_grid, incl, M, acc,
+            B, r_grid, a_grid, b_grid, incl, M, acc, kerr=kerr, spin=spin,
             noise=noise,
             noise_amp=noise_amp if texture in ("noise", "infall", "filament") else 0.0,
             boost_ramp=boost_ramp if inner_boost > 0.0 else None,
@@ -796,7 +870,18 @@ def render_raster(
         "color": color,
         "tone": tone,
         "n_particles": particles,
+        "psf_fwhm": float(psf_fwhm),
+        "kerr": kerr,
+        "spin": float(spin),
     }
+
+    # Apply PSF (camera optics blur) after all rendering
+    if psf_fwhm > 0.0:
+        rgb = _apply_psf(rgb, sigma=psf_fwhm / 2.355, fwhm=psf_fwhm)
+        stats["psf_applied"] = True
+    else:
+        stats["psf_applied"] = False
+
     return rgb, stats, particle_layer
 
 
@@ -842,6 +927,12 @@ def main():
     p.add_argument("--noise-seed", type=int, default=0)
     p.add_argument("--inner-boost", type=float, default=0.0,
                    help="extra brightness ramp toward ISCO (try 1-3)")
+    # PSF / camera optics
+    p.add_argument("--psf-fwhm", type=float, default=0.0,
+                   help="Point spread function full-width at half-maximum in pixels "
+                        "(simulates camera/optics blur; 0 = no PSF)")
+    p.add_argument("--psf-kernel", type=int, default=None,
+                   help="PSF convolution kernel size (auto-computed from --psf-fwhm if 0)")
     p.add_argument("--color", default="cmap", choices=["cmap", "blackbody"],
                    help="blackbody: T(r) hues (white-hot inside, orange out)")
     p.add_argument("--tone", default="gamma", choices=["gamma", "filmic"],
@@ -926,6 +1017,8 @@ def main():
         stars=args.stars,
         star_seed=args.star_seed,
         beaming=args.beaming,
+        psf_fwhm=args.psf_fwhm,
+        psf_kernel_size=args.psf_kernel,
     )
 
     plt.figure(figsize=(8, 8), dpi=120)

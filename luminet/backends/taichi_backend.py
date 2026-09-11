@@ -29,6 +29,41 @@ _ti_initialized = False
 _ti_arch = None
 _warned_f32 = False  # Track if we've warned about f32 precision loss
 
+# Map user-friendly arch names to the concrete taichi_backend arch_name they resolve to.
+_GPU_ARCH_MAP = {"vulkan": "vulkan", "cuda": "cuda", "nvidia": "cuda", "amd": "vulkan"}
+
+
+def _ti_runtime_alive() -> bool:
+    """True if Taichi's global runtime program is still initialized.
+
+    ``ti.reset()`` (common between tests) tears the runtime down and sets the
+    program to None, which would leave any cached backend config stale and
+    crash on the next kernel launch.
+    """
+    try:
+        import taichi.lang.impl as _impl
+
+        return _impl.get_runtime().prog is not None
+    except Exception:
+        return False
+
+
+def _ti_arch_matches(requested: str) -> bool:
+    """Whether the cached Taichi arch satisfies ``requested``.
+
+    ``auto``/``gpu`` accept any cached resolution (the gpu path may legitimately
+    fall back to CPU f64). A specific arch must match the cached one exactly.
+    """
+    if _ti_arch is None:
+        return False
+    cached_name = _ti_arch[0]
+    if requested in ("auto", "gpu"):
+        return True
+    if requested == "cpu":
+        return cached_name == "cpu"
+    return _GPU_ARCH_MAP.get(requested) == cached_name
+
+
 def _init_taichi(arch: str = "auto", force: bool = False):
     """Initialize Taichi with the specified architecture.
     
@@ -45,7 +80,7 @@ def _init_taichi(arch: str = "auto", force: bool = False):
     """
     global _ti_initialized, _ti_arch
     
-    if _ti_initialized and not force:
+    if _ti_initialized and not force and _ti_runtime_alive() and _ti_arch_matches(arch):
         return _ti_arch
     
     if not TAICHI_AVAILABLE:

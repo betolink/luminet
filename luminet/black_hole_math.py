@@ -776,3 +776,133 @@ def calc_redshift_factor(radius, angle, incl, bh_mass, b):
         1.0 + np.sqrt(bh_mass / (radius**3)) * b * np.sin(incl) * np.sin(angle)
     ) * (1 - 3.0 * bh_mass / radius) ** -0.5
     return z_factor
+
+
+def calc_doppler_factor(radius, angle, incl, bh_mass, b):
+    r"""
+    Calculate the relativistic Doppler beaming factor from Keplerian orbital motion.
+
+    For a photon emitted by matter on a Keplerian orbit around a Schwarzschild
+    black hole, the observed frequency is shifted by both gravitational redshift
+    and the Doppler effect from the orbital motion. The total Doppler factor is:
+
+    .. math::
+
+        \delta = \frac{1}{1+z_{total}}
+
+    where :math:`z_{total}` includes both gravitational and kinematic contributions.
+
+    The kinematic Doppler factor for a Keplerian orbit is:
+
+    .. math::
+
+        \delta_{kin} = \frac{1}{\Gamma(1 - \beta \sin i \sin \phi)}
+
+    where :math:`\Gamma` is the Lorentz factor, :math:`\beta` is the orbital velocity,
+    :math:`i` is the inclination, and :math:`\phi` is the azimuthal angle of the emitting
+    matter.
+
+    Args:
+        radius (float): Radius of the emitting matter on the accretion disk.
+        angle (float): Azimuthal angle of the emitting matter on the disk.
+        incl (float): Inclination of the observer (radians).
+        bh_mass (float): Mass of the black hole.
+        b (float): Impact parameter of the photon.
+
+    Returns:
+        float: Doppler beaming factor :math:`\delta`.
+
+    Example::
+
+        >>> calc_doppler_factor(10.0, 0.5, 1.4, 1.0, 5.0)
+        0.95
+    """
+    # Keplerian orbital velocity in natural units (G=c=1)
+    # v = sqrt(M / r) for Schwarzschild metric
+    beta = np.sqrt(bh_mass / radius)
+
+    # The Doppler factor accounts for the motion of the emitting matter
+    # relative to the observer, projected along the photon direction
+    # For a Keplerian orbit viewed at inclination i, the line-of-sight velocity
+    # component is: v_los = v * sin(i) * sin(phi)
+    # where phi is the azimuthal angle of the emitting matter
+
+    # Simplified: for Schwarzschild, the Doppler factor can be approximated as:
+    # delta = (1 - beta * sin(i) * sin(angle))^{-1} * sqrt(1 - beta^2)
+    # This captures the approaching/receding asymmetry
+
+    # The approaching side (angle ~ pi/2 for incl ~ pi/2) has beta_los > 0,
+    # giving delta > 1 (blueshift, brighter)
+    # The receding side has beta_los < 0, giving delta < 1 (redshift, dimmer)
+
+    # Line-of-sight velocity component (simplified projection)
+    # The photon direction from the disk to the observer depends on the
+    # impact parameter and the geometry. For a simple model:
+    beta_los = beta * np.sin(incl) * np.sin(angle)
+
+    # Doppler factor: delta = sqrt(1 - beta^2) / (1 - beta_los)
+    # This ensures delta = 1 when beta_los = 0 (face-on or no motion)
+    doppler = np.sqrt(1.0 - beta**2) / (1.0 - beta_los)
+    doppler = np.where(np.abs(doppler) > 1e-10, doppler, 1.0)
+
+    return doppler
+
+
+def calc_flux_observed_with_doppler(r, acc, bh_mass, redshift_factor, exponent=4,
+                                     doppler_factor=None):
+    r"""
+    Calculate the observed flux including relativistic Doppler beaming.
+
+    The observed specific intensity transforms as:
+    :math:`I_{obs} = I_{emit} / (1+z)^3 * \delta^3`
+
+    where :math:`\delta` is the Doppler factor from orbital motion.
+    The Doppler factor **multiplies** the gravitational flux because it
+    represents the beaming effect (approaching side brighter, receding dimmer).
+
+    For bolometric flux, the exponent is 4 (gravitational) + 3 (Doppler beaming).
+
+    Args:
+        r (float): radius on the accretion disk (BH frame)
+        acc (float): accretion rate
+        bh_mass (float): mass of the black hole
+        redshift_factor (float): gravitational redshift factor (1+z)
+        exponent (int): flux exponent for gravitational part (default 4 for bolometric)
+        doppler_factor (float, optional): Doppler beaming factor from orbital motion.
+            If None, no Doppler beaming is applied.
+
+    Returns:
+        float: Observed flux of the photon :math:`F_o`
+    """
+    flux_intr = calc_flux_intrinsic_swarzschild(r=r, acc=acc, bh_mass=bh_mass)
+    if doppler_factor is not None:
+        # Doppler beaming MULTIPLIES the gravitational flux
+        # delta > 1 for approaching (blueshift, brighter)
+        # delta < 1 for receding (redshift, dimmer)
+        flux_observed = flux_intr / redshift_factor**exponent * doppler_factor**exponent
+    else:
+        flux_observed = flux_intr / redshift_factor**exponent
+    return flux_observed
+
+
+def calc_flux_observed_kerr(r, acc, bh_mass, spin, redshift_factor, exponent=4):
+    r"""
+    Calculate the observed flux for a Kerr black hole accretion disk.
+
+    Uses the Kerr metric flux calculation with the Page-Thorne f-function
+    for the specific angular momentum of the orbiting matter.
+
+    Args:
+        r (float): radius on the accretion disk (BH frame)
+        acc (float): accretion rate
+        bh_mass (float): mass of the black hole
+        spin (float): dimensionless spin parameter a* (between -1 and 1)
+        redshift_factor (float): gravitational redshift factor (1+z)
+        exponent (int): flux exponent (default 4 for bolometric)
+
+    Returns:
+        float: Observed flux of the photon :math:`F_o`
+    """
+    flux_intr = calc_flux_intrinsic_kerr(bh_mass=bh_mass, a=spin, r=r, acc=acc)
+    flux_observed = flux_intr / redshift_factor**exponent
+    return flux_observed

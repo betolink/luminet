@@ -1,76 +1,100 @@
-"""Test Taichi type flexibility for GPU f32 support."""
+"""Test Taichi type flexibility for GPU f32 support.
+
+These exercise Taichi's own type system (``ti.template()`` vs hardcoded
+``ti.f64``/``ti.f32``) rather than the luminet physics. GPU (Vulkan) cases are
+skipped automatically when no Vulkan backend is available.
+"""
+import numpy as np
+import pytest
 import taichi as ti
 
-# Test 1: ti.template() for generic typing
-ti.init(arch=ti.cpu, default_fp=ti.f64)
+_VULKAN_AVAILABLE = None
 
+
+def _vulkan_available():
+    """Cache a one-time probe of Vulkan/GPU availability."""
+    global _VULKAN_AVAILABLE
+    if _VULKAN_AVAILABLE is None:
+        try:
+            _VULKAN_AVAILABLE = bool(ti.has_vulkan())
+        except AttributeError:
+            try:
+                ti.init(arch=ti.vulkan, log_level="error")
+                ti.reset()
+                _VULKAN_AVAILABLE = True
+            except Exception:
+                _VULKAN_AVAILABLE = False
+    return _VULKAN_AVAILABLE
+
+
+@pytest.fixture(autouse=True)
+def _reset_taichi_between_tests():
+    """Reset Taichi's global state after every test."""
+    yield
+    ti.reset()
+
+
+# A generic kernel-internal function usable by both precisions.
 @ti.func
 def generic_func(x: ti.template()) -> ti.template():
-    """Generic function that works with any type."""
+    """Generic function that works with any numeric type."""
     return ti.sqrt(x * 2.0)
 
-@ti.kernel
-def test_kernel_f32(x: ti.f32) -> ti.f32:
-    return generic_func(x)
 
-@ti.kernel  
-def test_kernel_f64(x: ti.f64) -> ti.f64:
-    return generic_func(x)
+def test_ti_template_works_for_f32_and_f64():
+    """``ti.template()`` lets one func be called from both f32 and f64 kernels."""
+    ti.init(arch=ti.cpu, default_fp=ti.f64, log_level="error")
 
-print("Test 1: ti.template() for generic types")
-try:
-    result_f32 = test_kernel_f32(16.0)
-    result_f64 = test_kernel_f64(16.0)
-    print(f"  f32 result: {result_f32:.6f}")
-    print(f"  f64 result: {result_f64:.6f}")
-    print("  ✅ ti.template() works!")
-except Exception as e:
-    print(f"  ❌ Failed: {e}")
+    @ti.kernel
+    def kernel_f32(x: ti.f32) -> ti.f32:
+        return generic_func(x)
 
-ti.reset()
+    @ti.kernel
+    def kernel_f64(x: ti.f64) -> ti.f64:
+        return generic_func(x)
 
-# Test 2: Explicit f32 initialization with f64 functions
-print("\nTest 2: f32 init with f64 function signatures (current bug)")
-ti.init(arch=ti.cpu, default_fp=ti.f32)
+    expected = float(np.sqrt(16.0 * 2.0))
 
-@ti.func
-def hardcoded_f64_func(x: ti.f64) -> ti.f64:
-    """Function with hardcoded f64 types."""
-    return ti.sqrt(x * 2.0)
+    r32 = float(kernel_f32(16.0))
+    r64 = float(kernel_f64(16.0))
 
-@ti.kernel
-def test_mixed_types(x: ti.f32) -> ti.f32:
-    # This should fail - calling f64 function with f32 value
-    return hardcoded_f64_func(x)
+    # f32 is only ~6-7 digits; f64 should match to machine precision.
+    assert abs(r32 - expected) / expected < 1e-5
+    assert abs(r64 - expected) / expected < 1e-12
 
-try:
-    result = test_mixed_types(16.0)
-    print(f"  Unexpected success: {result}")
-except Exception as e:
-    print(f"  ❌ Expected failure: {type(e).__name__}")
 
-ti.reset()
+def test_mixed_f32_kernel_with_f64_func_runs():
+    """A kernel declared f32 that calls an f64-typed func: Taichi upcasts and the
+    run completes with a finite result (~sqrt(32))."""
+    ti.init(arch=ti.cpu, default_fp=ti.f32, log_level="error")
 
-# Test 3: GPU Vulkan with f32
-print("\nTest 3: Vulkan GPU with f32 + generic functions")
-try:
-    ti.init(arch=ti.vulkan, default_fp=ti.f32, log_level='error')
-    
+    @ti.func
+    def hardcoded_f64_func(x: ti.f64) -> ti.f64:
+        return ti.sqrt(x * 2.0)
+
+    @ti.kernel
+    def mixed_kernel(x: ti.f32) -> ti.f32:
+        return hardcoded_f64_func(x)
+
+    result = float(mixed_kernel(16.0))
+    expected = float(np.sqrt(16.0 * 2.0))
+    assert np.isfinite(result)
+    assert abs(result - expected) / expected < 1e-5
+
+
+@pytest.mark.skipif(not _vulkan_available(), reason="no Vulkan/GPU backend available")
+def test_gpu_vulkan_f32_with_template():
+    """Vulkan GPU with f32 + generic ``ti.template()`` functions."""
+    ti.init(arch=ti.vulkan, default_fp=ti.f32, log_level="error")
+
     @ti.func
     def gpu_generic_func(x: ti.template()) -> ti.template():
-        """GPU-compatible generic function."""
         return ti.sqrt(x) + ti.sin(x)
-    
+
     @ti.kernel
     def gpu_test_kernel(x: ti.f32) -> ti.f32:
         return gpu_generic_func(x)
-    
-    result = gpu_test_kernel(2.0)
-    print(f"  Vulkan f32 result: {result:.6f}")
-    print("  ✅ GPU with ti.template() works!")
-    ti.reset()
-except Exception as e:
-    print(f"  ❌ GPU test failed: {e}")
-    ti.reset()
 
-print("\nConclusion: Use ti.template() instead of ti.f64 for GPU f32 support")
+    result = float(gpu_test_kernel(2.0))
+    expected = float(np.sqrt(2.0) + np.sin(2.0))
+    assert abs(result - expected) / expected < 1e-4

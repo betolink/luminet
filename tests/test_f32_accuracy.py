@@ -235,84 +235,77 @@ def test_batch_accuracy():
 
 
 def test_elliptic_functions():
-    """Test accuracy of individual elliptic functions."""
+    """Test accuracy of the taichi elliptic integrals vs the scipy (f64) reference.
+
+    The taichi backend ships native GPU-compatible elliptic kernels. We drive the
+    scalar-only ones (complete integral K(m) and Jacobi sn(u,m)) through small test
+    kernels and compare against scipy.special, the f64 baseline.
+
+    Note: the backend's incomplete-integral kernel (F) and its ``calc_sn`` method use
+    a physics argument signature (impact parameter / angle / mass); they are covered
+    by ``test_single_point_accuracy`` / ``test_batch_accuracy`` rather than here.
+    """
+    import taichi as ti
+    import scipy.special as sp
+    from luminet.backends.taichi_backend import ti_ellipk_agm, ti_ellipj_sn
+
+    # f64 baseline so the comparison measures algorithmic agreement, not precision.
+    ti.init(arch=ti.cpu, default_fp=ti.f64, log_level="error")
+
+    @ti.kernel
+    def _K(m: ti.types.ndarray(), out: ti.types.ndarray()):
+        for i in range(m.shape[0]):
+            out[i] = ti_ellipk_agm(m[i])
+
+    @ti.kernel
+    def _Sn(u: ti.types.ndarray(), mm: ti.types.ndarray(), out: ti.types.ndarray()):
+        for i in range(u.shape[0]):
+            out[i] = ti_ellipj_sn(u[i], mm[i])
+
     print("-" * 70)
-    print("TEST 3: Elliptic Function Accuracy")
+    print("TEST 3: Elliptic Function Accuracy (taichi native vs scipy.special)")
     print("-" * 70)
     print()
-    
-    scipy_backend = get_backend('scipy')
-    taichi_backend = get_backend('taichi', arch='cpu')
-    
-    print(f"Comparing elliptic functions (f64 baseline vs {taichi_backend.get_backend_name()}):")
-    print()
-    
-    # Test elliptic K
+
+    # --- Complete elliptic integral K(m) -------------------------------------
     print("Complete Elliptic Integral K(m):")
-    print(f"{'m':<10} {'Scipy (f64)':<18} {'Taichi':<18} {'Rel Error':<12}")
-    print("-" * 58)
-    
+    print(f"{'m':<8} {'Scipy (f64)':<18} {'Taichi':<18} {'Rel Error':<12}")
+    print("-" * 56)
+
     m_values = [0.1, 0.3, 0.5, 0.7, 0.9, 0.95, 0.99]
-    k_errors = []
-    
-    for m in m_values:
-        scipy_k = scipy_backend.calc_elliptic_k(m)
-        taichi_k = taichi_backend.calc_elliptic_k(m)
-        rel_err = abs(scipy_k - taichi_k) / abs(scipy_k)
-        k_errors.append(rel_err)
-        print(f"{m:<10.2f} {scipy_k:<18.12f} {taichi_k:<18.12f} {rel_err:<12.2e}")
-    
-    print()
-    print(f"K(m) - Mean relative error: {np.mean(k_errors):.2e}")
-    print(f"K(m) - Max relative error:  {np.max(k_errors):.2e}")
-    print()
-    
-    # Test incomplete elliptic integral F
-    print("Incomplete Elliptic Integral F(φ,m):")
-    print(f"{'φ':<8} {'m':<8} {'Scipy (f64)':<18} {'Taichi':<18} {'Rel Error':<12}")
-    print("-" * 66)
-    
-    f_errors = []
-    phi_values = [0.5, 1.0, 1.5]
-    m_values_f = [0.3, 0.6, 0.9]
-    
-    for phi in phi_values:
-        for m in m_values_f:
-            scipy_f = scipy_backend.calc_elliptic_f(phi, m)
-            taichi_f = taichi_backend.calc_elliptic_f(phi, m)
-            rel_err = abs(scipy_f - taichi_f) / abs(scipy_f)
-            f_errors.append(rel_err)
-            print(f"{phi:<8.2f} {m:<8.2f} {scipy_f:<18.12f} {taichi_f:<18.12f} {rel_err:<12.2e}")
-    
-    print()
-    print(f"F(φ,m) - Mean relative error: {np.mean(f_errors):.2e}")
-    print(f"F(φ,m) - Max relative error:  {np.max(f_errors):.2e}")
-    print()
-    
-    # Test Jacobi elliptic sn
-    print("Jacobi Elliptic sn(u,m):")
+    m_arr = np.array(m_values, dtype=np.float64)
+    taichi_k = np.zeros_like(m_arr)
+    _K(m_arr, taichi_k)
+    scipy_k = sp.ellipk(m_arr)
+    k_rel = np.abs(taichi_k - scipy_k) / np.abs(scipy_k)
+    for mv, sk, tk, re in zip(m_values, scipy_k, taichi_k, k_rel):
+        print(f"{mv:<8.2f} {sk:<18.12f} {tk:<18.12f} {re:<12.2e}")
+    print(f"\nK(m) - Max relative error: {np.max(k_rel):.2e}")
+    assert np.all(np.isfinite(taichi_k)), "taichi K(m) returned non-finite values"
+    assert np.max(k_rel) < 1e-6, f"K(m) rel error too large: {np.max(k_rel):.2e}"
+
+    # --- Jacobi elliptic function sn(u, m) -----------------------------------
+    print("\nJacobi Elliptic sn(u, m):")
     print(f"{'u':<8} {'m':<8} {'Scipy (f64)':<18} {'Taichi':<18} {'Rel Error':<12}")
-    print("-" * 66)
-    
-    sn_errors = []
-    u_values = [0.5, 1.0, 1.5, 2.0]
+    print("-" * 56)
+
+    u_values = [0.5, 1.0, 1.5]
     m_values_sn = [0.2, 0.5, 0.8]
-    
-    for u in u_values:
-        for m in m_values_sn:
-            scipy_sn = scipy_backend.calc_sn(u, m)
-            taichi_sn = taichi_backend.calc_sn(u, m)
-            if abs(scipy_sn) > 1e-10:
-                rel_err = abs(scipy_sn - taichi_sn) / abs(scipy_sn)
-            else:
-                rel_err = abs(scipy_sn - taichi_sn)
-            sn_errors.append(rel_err)
-            print(f"{u:<8.2f} {m:<8.2f} {scipy_sn:<18.12f} {taichi_sn:<18.12f} {rel_err:<12.2e}")
-    
-    print()
-    print(f"sn(u,m) - Mean relative error: {np.mean(sn_errors):.2e}")
-    print(f"sn(u,m) - Max relative error:  {np.max(sn_errors):.2e}")
-    print()
+    u_arr = np.array(u_values, dtype=np.float64)
+    m_arr_sn = np.array(m_values_sn, dtype=np.float64)
+    taichi_sn = np.zeros(len(u_values))
+    _Sn(u_arr, m_arr_sn, taichi_sn)
+    # scipy.special.ellipj returns (sn, cn, dn, ph); sn is index 0.
+    scipy_sn = sp.ellipj(u_arr, m_arr_sn)[0]
+    sn_rel = np.abs(taichi_sn - scipy_sn) / np.abs(scipy_sn)
+    for uv, mv, ss, ts, re in zip(u_values, m_values_sn, scipy_sn, taichi_sn, sn_rel):
+        print(f"{uv:<8.2f} {mv:<8.2f} {ss:<18.12f} {ts:<18.12f} {re:<12.2e}")
+    print(f"\nsn(u,m) - Max relative error: {np.max(sn_rel):.2e}")
+    assert np.all(np.isfinite(taichi_sn)), "taichi sn(u,m) returned non-finite values"
+    assert np.max(sn_rel) < 1e-6, f"sn(u,m) rel error too large: {np.max(sn_rel):.2e}"
+
+    ti.reset()
+    print("\nAll elliptic-function checks passed.")
 
 
 def print_summary():

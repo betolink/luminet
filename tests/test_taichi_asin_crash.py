@@ -1,110 +1,98 @@
-"""Test the specific Taichi GPU crash with asin and complex math."""
+"""Test the specific Taichi f32 behaviour with transcendental functions (asin).
+
+Verifies that ``ti.asin`` (and complex nested kernels using it) work on CPU, and
+documents the recommended ``ti.template()`` approach for GPU f32. GPU (Vulkan)
+cases are skipped when no Vulkan backend is available.
+"""
+import numpy as np
+import pytest
 import taichi as ti
-import sys
 
-print("Testing Taichi GPU f32 with transcendental functions...\n")
+_VULKAN_AVAILABLE = None
 
-# Test 1: CPU f32 with hardcoded f64 functions using asin
-print("Test 1: CPU f32 with asin (hardcoded ti.f64)")
-ti.init(arch=ti.cpu, default_fp=ti.f32, log_level='error')
 
-@ti.func
-def calc_with_asin_f64(x: ti.f64) -> ti.f64:
-    """Use asin with hardcoded f64 type."""
-    return ti.asin(ti.sqrt(x))
+def _vulkan_available():
+    """Cache a one-time probe of Vulkan/GPU availability."""
+    global _VULKAN_AVAILABLE
+    if _VULKAN_AVAILABLE is None:
+        try:
+            _VULKAN_AVAILABLE = bool(ti.has_vulkan())
+        except AttributeError:
+            try:
+                ti.init(arch=ti.vulkan, log_level="error")
+                ti.reset()
+                _VULKAN_AVAILABLE = True
+            except Exception:
+                _VULKAN_AVAILABLE = False
+    return _VULKAN_AVAILABLE
 
-@ti.kernel
-def test_cpu_asin(x: ti.f32) -> ti.f32:
-    return calc_with_asin_f64(x)
 
-try:
-    result = test_cpu_asin(0.25)
-    print(f"  ✅ CPU result: {result:.6f}")
-except Exception as e:
-    print(f"  ❌ CPU failed: {e}")
+@pytest.fixture(autouse=True)
+def _reset_taichi_between_tests():
+    """Reset Taichi's global state after every test."""
+    yield
+    ti.reset()
 
-ti.reset()
 
-# Test 2: GPU Vulkan f32 with hardcoded f64 asin
-print("\nTest 2: GPU Vulkan f32 with asin (hardcoded ti.f64)")
-try:
-    ti.init(arch=ti.vulkan, default_fp=ti.f32, log_level='error')
-    
+def test_cpu_f32_asin_runs():
+    """A CPU f32 kernel using ti.asin completes and returns a finite value."""
+    ti.init(arch=ti.cpu, default_fp=ti.f32, log_level="error")
+
     @ti.func
-    def calc_with_asin_f64_gpu(x: ti.f64) -> ti.f64:
-        """Use asin with hardcoded f64 type."""
+    def calc_with_asin(x: ti.template()) -> ti.template():
         return ti.asin(ti.sqrt(x))
-    
+
     @ti.kernel
-    def test_gpu_asin_f64(x: ti.f32) -> ti.f32:
-        return calc_with_asin_f64_gpu(x)
-    
-    result = test_gpu_asin_f64(0.25)
-    print(f"  ✅ GPU result: {result:.6f}")
-except Exception as e:
-    print(f"  ❌ GPU failed: {type(e).__name__}: {str(e)[:100]}")
+    def cpu_asin_kernel(x: ti.f32) -> ti.f32:
+        return calc_with_asin(x)
 
-ti.reset()
+    result = float(cpu_asin_kernel(0.25))
+    expected = float(np.arcsin(np.sqrt(0.25)))  # asin(0.5) = pi/6
+    assert np.isfinite(result)
+    assert abs(result - expected) / expected < 1e-4
 
-# Test 3: GPU Vulkan f32 with ti.template() asin  
-print("\nTest 3: GPU Vulkan f32 with asin (ti.template)")
-try:
-    ti.init(arch=ti.vulkan, default_fp=ti.f32, log_level='error')
-    
+
+def test_cpu_complex_nested_asin():
+    """A deeply nested CPU kernel (sqrt/asin/sin) mimicking backend math runs."""
+    ti.init(arch=ti.cpu, default_fp=ti.f64, log_level="error")
+
     @ti.func
-    def calc_with_asin_template(x: ti.template()) -> ti.template():
-        """Use asin with template type."""
-        return ti.asin(ti.sqrt(x))
-    
-    @ti.kernel
-    def test_gpu_asin_template(x: ti.f32) -> ti.f32:
-        return calc_with_asin_template(x)
-    
-    result = test_gpu_asin_template(0.25)
-    print(f"  ✅ GPU result: {result:.6f}")
-except Exception as e:
-    print(f"  ❌ GPU failed: {type(e).__name__}: {str(e)[:100]}")
-
-ti.reset()
-
-# Test 4: Complex nested functions like the actual backend
-print("\nTest 4: Complex nested functions (simulating BlackHole init)")
-try:
-    ti.init(arch=ti.vulkan, default_fp=ti.f32, log_level='error')
-    
-    @ti.func
-    def inner_math(a: ti.f64, b: ti.f64) -> ti.f64:
+    def inner_math(a: ti.template(), b: ti.template()) -> ti.template():
         return ti.sqrt(a * a + b * b)
-    
-    @ti.func  
-    def middle_layer(x: ti.f64) -> ti.f64:
+
+    @ti.func
+    def middle_layer(x: ti.template()) -> ti.template():
         temp = inner_math(x, x * 2.0)
         return ti.asin(ti.sqrt(temp / 10.0))
-    
+
     @ti.func
-    def outer_calc(val: ti.f64) -> ti.f64:
+    def outer_calc(val: ti.template()) -> ti.template():
         result = middle_layer(val)
-        for i in range(5):
+        for _ in range(5):
             result = result + ti.sin(result) * 0.1
         return result
-    
+
     @ti.kernel
-    def complex_kernel(x: ti.f32) -> ti.f32:
+    def complex_kernel(x: ti.f64) -> ti.f64:
         return outer_calc(x)
-    
-    result = complex_kernel(2.0)
-    print(f"  ✅ Complex GPU result: {result:.6f}")
-except Exception as e:
-    error_msg = str(e)
-    if 'does not 64bits operation' in error_msg or 'Asin' in error_msg:
-        print(f"  ❌ GPU CRASH (this is our bug!): {error_msg[:200]}")
-    else:
-        print(f"  ❌ GPU failed: {type(e).__name__}: {error_msg[:100]}")
 
-ti.reset()
+    result = float(complex_kernel(2.0))
+    assert np.isfinite(result)
 
-print("\n" + "="*70)
-print("CONCLUSION:")
-print("  If Test 2 or 4 failed with 'does not 64bits operation',")
-print("  then we MUST replace all ti.f64 with ti.template()")
-print("="*70)
+
+@pytest.mark.skipif(not _vulkan_available(), reason="no Vulkan/GPU backend available")
+def test_gpu_vulkan_f32_asin_template():
+    """Vulkan GPU f32 with asin using ti.template() (the recommended form)."""
+    ti.init(arch=ti.vulkan, default_fp=ti.f32, log_level="error")
+
+    @ti.func
+    def calc_with_asin_template(x: ti.template()) -> ti.template():
+        return ti.asin(ti.sqrt(x))
+
+    @ti.kernel
+    def gpu_asin_kernel(x: ti.f32) -> ti.f32:
+        return calc_with_asin_template(x)
+
+    result = float(gpu_asin_kernel(0.25))
+    expected = float(np.arcsin(np.sqrt(0.25)))
+    assert abs(result - expected) / expected < 1e-3
