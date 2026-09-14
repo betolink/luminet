@@ -28,11 +28,11 @@ pixi add --pypi luminet
 
 - [Official Documentation](https://luminet.readthedocs.io/en/latest/index.html)
 - **Documentation**:
-  - [QUICKSTART.md](QUICKSTART.md) - Quick start guide
-  - [GPU_BACKENDS.md](GPU_BACKENDS.md) - GPU setup and hardware requirements
-  - [VIDEO_GENERATION.md](VIDEO_GENERATION.md) - Video generation guide
-  - [PERF.md](PERF.md) - Performance benchmarks
-  - [BACKEND_DEFAULTS.md](BACKEND_DEFAULTS.md) - Default settings reference
+  - [QUICKSTART.md](docs/QUICKSTART.md) - Quick start guide
+  - [GPU_BACKENDS.md](docs/GPU_BACKENDS.md) - GPU setup and hardware requirements
+  - [VIDEO_GENERATION.md](docs/VIDEO_GENERATION.md) - Video generation guide
+  - [PERF.md](docs/PERF.md) - Performance benchmarks
+  - [BACKEND_DEFAULTS.md](docs/BACKEND_DEFAULTS.md) - Default settings reference
 - **Technical Documentation**:
   - [docs/TECHNICAL.md](docs/TECHNICAL.md) - Precision analysis, backend architecture, numerical methods
   - [luminet/backends/README.md](luminet/backends/README.md) - Backend developer documentation
@@ -122,7 +122,7 @@ bh = BlackHole(mass=1, incl=1.4, acc=1, outer_edge=40)
 - **AMD GPUs**: Taichi (Vulkan) works, JAX not supported
 - **Precision**: Consumer GPUs use f32 (~1e-7 accuracy), professional GPUs may support f64
 
-For detailed GPU setup, see [GPU_BACKENDS.md](GPU_BACKENDS.md).
+For detailed GPU setup, see [GPU_BACKENDS.md](docs/GPU_BACKENDS.md).
 
 ### Command-Line Rendering
 
@@ -160,8 +160,8 @@ Measured performance (200×200 resolution render):
 - GPU backends (taichi-gpu, jax-gpu): f32 precision, max error ~1e-7 (sufficient for visualization)
 
 For detailed performance analysis and GPU setup guides:
-- [PERF.md](PERF.md) - Performance benchmarks
-- [GPU_BACKENDS.md](GPU_BACKENDS.md) - GPU setup and hardware requirements
+- [PERF.md](docs/PERF.md) - Performance benchmarks
+- [GPU_BACKENDS.md](docs/GPU_BACKENDS.md) - GPU setup and hardware requirements
 - [docs/TECHNICAL.md](docs/TECHNICAL.md) - Precision analysis and backend architecture
 - [luminet/backends/README.md](luminet/backends/README.md) - Backend developer documentation
 

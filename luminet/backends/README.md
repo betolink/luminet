@@ -158,6 +158,6 @@ _AVAILABLE_BACKENDS['your_backend'] = YourBackend
 
 ## References
 
-- [Technical Documentation](../docs/TECHNICAL.md) - Precision analysis and numerical methods
-- [GPU Backends Guide](../../GPU_BACKENDS.md) - GPU setup and hardware requirements
-- [Performance Benchmarks](../../PERF.md) - Detailed performance comparison
+- [Technical Documentation](../../docs/TECHNICAL.md) - Precision analysis and numerical methods
+- [GPU Backends Guide](../../docs/GPU_BACKENDS.md) - GPU setup and hardware requirements
+- [Performance Benchmarks](../../docs/PERF.md) - Detailed performance comparison
