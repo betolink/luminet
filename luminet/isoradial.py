@@ -96,14 +96,14 @@ class Isoradial:
                 bh_mass=self.bh_mass,
                 order=self.order,
             )
-            assert (
-                b > 0
-            ), "Impact parameter should be positive, but it wasnt for: R={}, alpha={}, incl={}".format(
-                self.radius, alpha, self.incl
-            )
-            if b is np.nan:
+            if not np.isfinite(b):
                 impact_parameters.append(bhmath.ellipse(self.radius, alpha, self.incl))
             else:
+                assert (
+                    b > 0
+                ), "Impact parameter should be positive, but it wasnt for: R={}, alpha={}, incl={}".format(
+                    self.radius, alpha, self.incl
+                )
                 impact_parameters.append(b)
             angles.append(alpha)
 

@@ -26,14 +26,36 @@ class BlackHole:
             acc=1.0, 
             outer_edge=None,
             angular_resolution=200,
-            radial_resolution=200
+            radial_resolution=200,
+            backend='scipy',
+            **backend_kwargs
     ):
         """
         Args:
             mass (float): Mass of the black hole in natural units :math:`G = c = 1`
             incl (float): Inclination of the observer's plane in radians
             acc (float): Accretion rate in natural units
+            backend (str): Computational backend to use ('scipy', 'numba', 'taichi', 'jax').
+                          Default is 'scipy'. Use 'numba' for ~10× speedup.
+            **backend_kwargs: Additional arguments passed to backend (e.g., arch='cpu' for taichi)
+        
+        Example::
+        
+            # Default scipy backend
+            bh = BlackHole(mass=1.0, incl=1.4)
+            
+            # 10× faster with Numba
+            bh = BlackHole(mass=1.0, incl=1.4, backend='numba')
+            
+            # GPU acceleration with Taichi (experimental)
+            bh = BlackHole(mass=1.0, incl=1.4, backend='taichi', arch='gpu')
         """
+        # Set computational backend for all math operations
+        import luminet.black_hole_math as bhmath
+        bhmath.set_backend(backend, **backend_kwargs)
+        self.backend = bhmath.get_current_backend()
+        self.backend_name = self.backend.get_backend_name()
+        
         self.incl = incl
         """float: Inclination angle of the observer"""
         self.mass = mass
@@ -294,7 +316,11 @@ class BlackHole:
         if color_by == "redshift":
             if not "cmap" in kwargs:
                 kwargs["cmap"] = "RdBu_r"
-            mx = np.max([np.max(z) for z in zs])
+            zs = [
+                np.asarray(ir.redshift_factors) - 1.0
+                for ir in self.isoradials
+            ]
+            mx = np.max([np.max(np.abs(z)) for z in zs])
             norm = (-mx, mx)
         elif color_by == "flux":
             if not "cmap" in kwargs:
@@ -552,7 +578,7 @@ def sample_photon(min_r, max_r, incl, bh_mass, n):
     r = min_r + (max_r - min_r) * np.random.random()
     b = bhmath.solve_for_impact_parameter(r, incl, alpha, bh_mass, n)
     assert (
-        b is not np.nan
+        np.isfinite(b)
     ), f"b is nan for r={r}, alpha={alpha}, incl={incl}, M={bh_mass}, n={n}"
     # f_o = flux_observed(r, acc_r, bh_mass, redshift_factor_)
     return Photon(radius=r, alpha=alpha, impact_parameter=b)

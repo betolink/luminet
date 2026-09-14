@@ -5,4 +5,7 @@
 **.pyc
 **__pycache__**
 docs/build**
-docs/source/autoapi**
+docs/source/autoapi**.venv/
+*.png
+*.json
+*_results.txt

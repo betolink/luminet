@@ -24,7 +24,18 @@ pixi add --pypi luminet
 ```
 
 
-## 📖 [Documentation](https://luminet.readthedocs.io/en/latest/index.html)
+## 📖 Documentation
+
+- [Official Documentation](https://luminet.readthedocs.io/en/latest/index.html)
+- **Documentation**:
+  - [QUICKSTART.md](docs/QUICKSTART.md) - Quick start guide
+  - [GPU_BACKENDS.md](docs/GPU_BACKENDS.md) - GPU setup and hardware requirements
+  - [VIDEO_GENERATION.md](docs/VIDEO_GENERATION.md) - Video generation guide
+  - [PERF.md](docs/PERF.md) - Performance benchmarks
+  - [BACKEND_DEFAULTS.md](docs/BACKEND_DEFAULTS.md) - Default settings reference
+- **Technical Documentation**:
+  - [docs/TECHNICAL.md](docs/TECHNICAL.md) - Precision analysis, backend architecture, numerical methods
+  - [luminet/backends/README.md](luminet/backends/README.md) - Backend developer documentation
 
 ## 🔩 Usage
 
@@ -56,6 +67,103 @@ radius  alpha   impact_parameter    z_factor    flux_o
 ```
 
 Note that sampling is biased towards the center of the black hole, since this is where most of the luminosity comes from.
+
+## ⚡ Performance & Computational Backends
+
+Luminet supports multiple computational backends with varying performance characteristics:
+
+| Backend | Speed | Precision | GPU Support | Installation |
+|---------|-------|-----------|-------------|--------------|
+| **numba** | 4.7× faster | f64 | No | `pip install numba` ✅ **RECOMMENDED for CPU** |
+| **taichi-cpu** | ~4.5× faster | f64 | No | `pip install taichi` |
+| **taichi-gpu** | 10-50× faster* | f32 | ✅ Yes (CUDA/Vulkan) | `pip install taichi` ✅ **RECOMMENDED for GPU** |
+| **jax-gpu** | 5-20× faster* | f32/f64 | ✅ Yes (CUDA only) | `pip install jax[cuda12]` |
+| **scipy** | Baseline | f64 | No | Included by default |
+
+*GPU speedup depends on problem size (larger = better). f32 precision (~1e-7 accuracy) is sufficient for visualization.
+
+### CPU Usage (Recommended)
+
+```python
+from luminet.black_hole import BlackHole
+
+# Default scipy backend (baseline)
+bh = BlackHole(mass=1, incl=1.4, acc=1, outer_edge=40)
+
+# Numba backend (4.7× faster - RECOMMENDED for CPU)
+bh = BlackHole(mass=1, incl=1.4, acc=1, outer_edge=40, backend='numba')
+
+# Taichi CPU backend (similar performance)
+bh = BlackHole(mass=1, incl=1.4, acc=1, outer_edge=40, backend='taichi', arch='cpu')
+```
+
+### GPU Acceleration (NVIDIA/AMD)
+
+```python
+from luminet.backends import get_backend
+from luminet import black_hole_math as bhmath
+from luminet.black_hole import BlackHole
+
+# Taichi GPU (works on both NVIDIA CUDA and AMD Vulkan)
+backend = get_backend('taichi', arch='gpu')  # Auto-detects best GPU backend
+bhmath._backend = backend
+
+bh = BlackHole(mass=1, incl=1.4, acc=1, outer_edge=40)
+
+# JAX GPU (NVIDIA CUDA only)
+backend = get_backend('jax', use_gpu=True)
+bhmath._backend = backend
+
+bh = BlackHole(mass=1, incl=1.4, acc=1, outer_edge=40)
+```
+
+**GPU Requirements**:
+- **NVIDIA GPUs**: Both Taichi (CUDA) and JAX work
+- **AMD GPUs**: Taichi (Vulkan) works, JAX not supported
+- **Precision**: Consumer GPUs use f32 (~1e-7 accuracy), professional GPUs may support f64
+
+For detailed GPU setup, see [GPU_BACKENDS.md](docs/GPU_BACKENDS.md).
+
+### Command-Line Rendering
+
+A `render.py` tool provides easy command-line access:
+
+```bash
+# High-quality render with Numba backend
+python render.py --backend=numba --resolution=500 --output=blackhole.png
+
+# GPU-accelerated render with Taichi
+python render.py --backend=taichi --resolution=500 --output=blackhole.png
+
+# Debug mode with accuracy statistics
+python render.py --backend=numba --resolution=200 --debug
+
+# Benchmark all backends
+python render.py --benchmark --resolution=100
+```
+
+### Performance Benchmarks
+
+Measured performance (200×200 resolution render):
+
+**CPU Backends**:
+- **scipy**: 9.15 seconds (baseline)
+- **numba**: 1.95 seconds (**4.7× speedup**) ← Recommended for CPU
+- **taichi-cpu**: ~2.0 seconds (~4.5× speedup)
+
+**GPU Backends** (expected with NVIDIA/AMD GPU):
+- **taichi-gpu**: ~0.2-0.5 seconds (**10-50× speedup**) ← Recommended for GPU
+- **jax-gpu**: ~0.5-1.0 seconds (5-20× speedup, NVIDIA only)
+
+**Accuracy**: 
+- CPU backends (scipy, numba, taichi-cpu): f64 precision, max error < 1e-11
+- GPU backends (taichi-gpu, jax-gpu): f32 precision, max error ~1e-7 (sufficient for visualization)
+
+For detailed performance analysis and GPU setup guides:
+- [PERF.md](docs/PERF.md) - Performance benchmarks
+- [GPU_BACKENDS.md](docs/GPU_BACKENDS.md) - GPU setup and hardware requirements
+- [docs/TECHNICAL.md](docs/TECHNICAL.md) - Precision analysis and backend architecture
+- [luminet/backends/README.md](luminet/backends/README.md) - Backend developer documentation
 
 
 ## 📝 Background

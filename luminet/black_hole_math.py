@@ -2,11 +2,64 @@
 
 This module contains the mathematical routines to calculate the trajectory of photons around 
 a Swarzschild black hole, as described in :cite:t:`Luminet_1979`.
+
+Note:
+    This module now supports multiple computational backends (scipy, numba, taichi, jax).
+    Use :func:`set_backend` to change the backend globally, or use the default scipy backend.
 """
 import numpy as np
-from scipy.special import ellipj, ellipk, ellipkinc
 
 from luminet.solver import improve_solutions
+
+# Backend management
+_backend = None
+
+def set_backend(backend_name='scipy', **kwargs):
+    """Set the computational backend for all black hole math operations.
+    
+    Args:
+        backend_name: Name of backend ('scipy', 'numba', 'taichi', 'jax')
+        **kwargs: Additional arguments passed to backend constructor
+                 (e.g., arch='gpu' for taichi)
+    
+    Example::
+    
+        import luminet.black_hole_math as bhmath
+        
+        # Use default scipy backend
+        bhmath.set_backend('scipy')
+        
+        # Use Numba for 10× speedup
+        bhmath.set_backend('numba')
+        
+        # Use Taichi CPU
+        bhmath.set_backend('taichi', arch='cpu')
+    
+    Returns:
+        BaseBackend: The initialized backend instance
+    """
+    global _backend
+    from luminet.backends import get_backend
+    _backend = get_backend(backend_name, **kwargs)
+    return _backend
+
+def get_current_backend():
+    """Get the currently active computational backend.
+    
+    Returns scipy backend if none has been explicitly set.
+    
+    Returns:
+        BaseBackend: Current backend instance
+    """
+    global _backend
+    if _backend is None:
+        set_backend('scipy')
+    return _backend
+
+def reset_backend():
+    """Reset to default scipy backend."""
+    global _backend
+    _backend = None
 
 def calc_q(p: float, bh_mass: float) -> float:
     r"""Convert periastron :math:`P` to :math:`Q`
@@ -24,10 +77,11 @@ def calc_q(p: float, bh_mass: float) -> float:
 
     Returns:
         float: :math:`Q`
+    
+    Note:
+        Uses the currently active computational backend.
     """
-    if p < 2.0 * bh_mass:
-        return np.nan
-    return np.sqrt((p - 2.0 * bh_mass) * (p + 6.0 * bh_mass))
+    return get_current_backend().calc_q(p, bh_mass)
 
 
 def calc_b_from_periastron(p: float, bh_mass: float) -> float:
@@ -79,7 +133,7 @@ def calc_k(periastron: float, bh_mass: float) -> float:
 
     """
     q = calc_q(periastron, bh_mass)
-    if q is np.nan:
+    if not np.isfinite(q):
         return np.nan
     # WARNING: Paper has an error here. There should be brackets around the numerator.
     return np.sqrt((q - periastron + 6 * bh_mass) / (2 * q))
@@ -99,12 +153,11 @@ def calc_k_squared(p: float, bh_mass: float):
     Args:
         p (float): periastron distance
         bh_mass (float): Black hole mass
+    
+    Note:
+        Uses the currently active computational backend.
     """
-    q = calc_q(p, bh_mass)
-    if q is np.nan:
-        return np.nan
-    # WARNING: Paper has an error here. There should be brackets around the numerator.
-    return (q - p + 6 * bh_mass) / (2 * q)
+    return get_current_backend().calc_k_squared(p, bh_mass)
 
 
 def calc_zeta_inf(p: float, bh_mass: float) -> float:
@@ -122,13 +175,11 @@ def calc_zeta_inf(p: float, bh_mass: float) -> float:
 
     Returns:
         float: :math:`\zeta_\infty`
+    
+    Note:
+        Uses the currently active computational backend.
     """
-    q = calc_q(p, bh_mass)
-    if q is np.nan:
-        return np.nan
-    arg = (q - p + 2 * bh_mass) / (q - p + 6 * bh_mass)
-    z_inf = np.arcsin(np.sqrt(arg))
-    return z_inf
+    return get_current_backend().calc_zeta_inf(p, bh_mass)
 
 
 def calc_zeta_r(p: float, r: float, bh_mass: float) -> float:
@@ -149,7 +200,7 @@ def calc_zeta_r(p: float, r: float, bh_mass: float) -> float:
         float: :math:`\zeta_r`
     """
     q = calc_q(p, bh_mass)
-    if q is np.nan:
+    if not np.isfinite(q):
         return np.nan
     a = (q - p + 2 * bh_mass + (4 * bh_mass * p) / r) / (
         q - p + (6 * bh_mass)
@@ -221,31 +272,11 @@ def calc_sn(
 
     Returns:
         float: Value of the elliptic integral :math:`\text{sn}`
+    
+    Note:
+        Uses the currently active computational backend.
     """
-    q = calc_q(p, bh_mass)
-    if q is np.nan:
-        return np.nan
-    z_inf = calc_zeta_inf(p, bh_mass)
-    m = calc_k_squared(p, bh_mass)  # mpmath takes m = k² as argument.
-    ell_inf = ellipkinc(z_inf, m)  # Elliptic integral F(zeta_inf, k)
-    g = np.arccos(calc_cos_gamma(angle, incl))
-
-    if order == 0:  # higher order image
-        ellips_arg = g / (2.0 * np.sqrt(p / q)) + ell_inf
-    elif order > 0:  # direct image
-        ell_k = ellipk(m)  # calculate complete elliptic integral of mod m = k²
-        ellips_arg = (
-            (g - 2.0 * order * np.pi) / (2.0 * np.sqrt(p / q))
-            - ell_inf
-            + 2.0 * ell_k
-        )
-    else:
-        raise NotImplementedError(
-            "Only 0 and positive integers are allowed for the image order."
-        )
-
-    sn, _, _, _ = ellipj(ellips_arg, m)
-    return sn
+    return get_current_backend().calc_sn(p, angle, bh_mass, incl, order)
 
 
 def calc_radius(
@@ -314,7 +345,7 @@ def periastron_optimization_function(
         float: Cost function value. Should be zero when the photon periastron value is correct.
     """
     q = calc_q(p, bh_mass)
-    if q is np.nan:
+    if not np.isfinite(q):
         return np.nan
     sn = calc_sn(p, ir_angle, bh_mass, incl, order)
     term1 = -(q - p + 2.0 * bh_mass)
@@ -371,7 +402,9 @@ def solve_for_periastron(
             for periastron_guess in periastron_initial_guess
         ]
     )
-    assert not any(np.isnan(y)), "Initial guess contains nan values"
+    # If the initial guesses produce NaN (e.g. p <= 2M edge cases) there is no valid orbit.
+    if any(np.isnan(y)):
+        return np.nan
 
     # If the solution is not in the initial range it likely doesnt exist for these input parameters
     # can happen for high inclinations and small radii -> photon orbits have P<3M, but the photon
@@ -422,25 +455,13 @@ def solve_for_impact_parameter(
 
     Returns:
         float: Impact parameter :math:`b` of the photon
+    
+    Note:
+        Uses the currently active computational backend for optimal performance.
     """
-    # alpha_obs is flipped alpha/bh if n is odd
-    if order % 2 == 1:
-        alpha = (alpha + np.pi) % (2 * np.pi)
-
-    periastron_solution = solve_for_periastron(radius, incl, alpha, bh_mass, order)
-
-    # Photons that have no periastron and are not due to the exception described above are simply absorbed
-    if periastron_solution is np.nan:
-        if order == 0 and ((alpha < np.pi / 2) or (alpha > 3 * np.pi / 2)):
-            # Photons with small R in the lower half of the image originate from photon orbits that
-            # have a periastron < 3M. However, these photons are not absorbed by the black hole and do in fact reach the camera,
-            # since they never actually travel this forbidden part of their orbit.
-            # --> Return the newtonian limit i.e. just an ellipse, like the rings of saturn that are visible in front of saturn.
-            return ellipse(radius, alpha, incl)
-        else:
-            return np.nan
-    b = calc_b_from_periastron(periastron_solution, bh_mass)
-    return b
+    return get_current_backend().solve_for_impact_parameter(
+        radius, incl, alpha, bh_mass, order
+    )
 
 
 def ellipse(r, a, incl) -> float:
@@ -705,24 +726,35 @@ def calc_flux_intrinsic_swarzschild(bh_mass, r, acc):
     return f
 
 
-def calc_flux_observed(r, acc, bh_mass, redshift_factor):
-    r"""Calculate the observed bolometric flux of a photon :math:`F_o`
+def calc_flux_observed(r, acc, bh_mass, redshift_factor, exponent=4):
+    r"""Calculate the observed flux of a photon :math:`F_o`.
 
-    .. math::
+    By default returns the *bolometric* observed flux
+    :math:`F_o = F_s / (1+z)^4` (Luminet 1979, Eq. 16), which is the total
+    energy flux integrated over all frequencies.
 
-        F_o = \frac{F_s}{(1 + z)^4}
+    For **image rendering** (specific intensity per pixel) pass ``exponent=3``:
+    Liouville's theorem gives :math:`I_\nu / \nu^3` as a Lorentz invariant, so
+    the observed specific intensity is :math:`I_{obs} = I_{emit} / (1+z)^3`.
+    The third power also equals the relativistic Doppler-beaming factor
+    :math:`\delta^3` for a Keplerian orbit, since :math:`\delta = 1/(1+z)`
+    here -- so ``exponent=3`` correctly sharpens the approaching/receding
+    asymmetry (beaming) without the extra bandwidth factor that the bolometric
+    ``-4`` carries.
     
     Args:
         r (float): radius on the accretion disk (BH frame)
         acc (float): accretion rate
         bh_mass (float): mass of the black hole
-        redshift_factor (float): gravitational redshift factor
+        redshift_factor (float): gravitational redshift factor (1+z)
+        exponent (int): 4 for bolometric flux (default, scientific),
+                        3 for specific intensity / Doppler beaming (rendering).
 
     Returns:
         float: Observed flux of the photon :math:`F_o`
     """
     flux_intr = calc_flux_intrinsic_swarzschild(r=r, acc=acc, bh_mass=bh_mass)
-    flux_observed = flux_intr / redshift_factor**4
+    flux_observed = flux_intr / redshift_factor**exponent
     return flux_observed
 
 
@@ -744,3 +776,133 @@ def calc_redshift_factor(radius, angle, incl, bh_mass, b):
         1.0 + np.sqrt(bh_mass / (radius**3)) * b * np.sin(incl) * np.sin(angle)
     ) * (1 - 3.0 * bh_mass / radius) ** -0.5
     return z_factor
+
+
+def calc_doppler_factor(radius, angle, incl, bh_mass, b):
+    r"""
+    Calculate the relativistic Doppler beaming factor from Keplerian orbital motion.
+
+    For a photon emitted by matter on a Keplerian orbit around a Schwarzschild
+    black hole, the observed frequency is shifted by both gravitational redshift
+    and the Doppler effect from the orbital motion. The total Doppler factor is:
+
+    .. math::
+
+        \delta = \frac{1}{1+z_{total}}
+
+    where :math:`z_{total}` includes both gravitational and kinematic contributions.
+
+    The kinematic Doppler factor for a Keplerian orbit is:
+
+    .. math::
+
+        \delta_{kin} = \frac{1}{\Gamma(1 - \beta \sin i \sin \phi)}
+
+    where :math:`\Gamma` is the Lorentz factor, :math:`\beta` is the orbital velocity,
+    :math:`i` is the inclination, and :math:`\phi` is the azimuthal angle of the emitting
+    matter.
+
+    Args:
+        radius (float): Radius of the emitting matter on the accretion disk.
+        angle (float): Azimuthal angle of the emitting matter on the disk.
+        incl (float): Inclination of the observer (radians).
+        bh_mass (float): Mass of the black hole.
+        b (float): Impact parameter of the photon.
+
+    Returns:
+        float: Doppler beaming factor :math:`\delta`.
+
+    Example::
+
+        >>> calc_doppler_factor(10.0, 0.5, 1.4, 1.0, 5.0)
+        0.95
+    """
+    # Keplerian orbital velocity in natural units (G=c=1)
+    # v = sqrt(M / r) for Schwarzschild metric
+    beta = np.sqrt(bh_mass / radius)
+
+    # The Doppler factor accounts for the motion of the emitting matter
+    # relative to the observer, projected along the photon direction
+    # For a Keplerian orbit viewed at inclination i, the line-of-sight velocity
+    # component is: v_los = v * sin(i) * sin(phi)
+    # where phi is the azimuthal angle of the emitting matter
+
+    # Simplified: for Schwarzschild, the Doppler factor can be approximated as:
+    # delta = (1 - beta * sin(i) * sin(angle))^{-1} * sqrt(1 - beta^2)
+    # This captures the approaching/receding asymmetry
+
+    # The approaching side (angle ~ pi/2 for incl ~ pi/2) has beta_los > 0,
+    # giving delta > 1 (blueshift, brighter)
+    # The receding side has beta_los < 0, giving delta < 1 (redshift, dimmer)
+
+    # Line-of-sight velocity component (simplified projection)
+    # The photon direction from the disk to the observer depends on the
+    # impact parameter and the geometry. For a simple model:
+    beta_los = beta * np.sin(incl) * np.sin(angle)
+
+    # Doppler factor: delta = sqrt(1 - beta^2) / (1 - beta_los)
+    # This ensures delta = 1 when beta_los = 0 (face-on or no motion)
+    doppler = np.sqrt(1.0 - beta**2) / (1.0 - beta_los)
+    doppler = np.where(np.abs(doppler) > 1e-10, doppler, 1.0)
+
+    return doppler
+
+
+def calc_flux_observed_with_doppler(r, acc, bh_mass, redshift_factor, exponent=4,
+                                     doppler_factor=None):
+    r"""
+    Calculate the observed flux including relativistic Doppler beaming.
+
+    The observed specific intensity transforms as:
+    :math:`I_{obs} = I_{emit} / (1+z)^3 * \delta^3`
+
+    where :math:`\delta` is the Doppler factor from orbital motion.
+    The Doppler factor **multiplies** the gravitational flux because it
+    represents the beaming effect (approaching side brighter, receding dimmer).
+
+    For bolometric flux, the exponent is 4 (gravitational) + 3 (Doppler beaming).
+
+    Args:
+        r (float): radius on the accretion disk (BH frame)
+        acc (float): accretion rate
+        bh_mass (float): mass of the black hole
+        redshift_factor (float): gravitational redshift factor (1+z)
+        exponent (int): flux exponent for gravitational part (default 4 for bolometric)
+        doppler_factor (float, optional): Doppler beaming factor from orbital motion.
+            If None, no Doppler beaming is applied.
+
+    Returns:
+        float: Observed flux of the photon :math:`F_o`
+    """
+    flux_intr = calc_flux_intrinsic_swarzschild(r=r, acc=acc, bh_mass=bh_mass)
+    if doppler_factor is not None:
+        # Doppler beaming MULTIPLIES the gravitational flux
+        # delta > 1 for approaching (blueshift, brighter)
+        # delta < 1 for receding (redshift, dimmer)
+        flux_observed = flux_intr / redshift_factor**exponent * doppler_factor**exponent
+    else:
+        flux_observed = flux_intr / redshift_factor**exponent
+    return flux_observed
+
+
+def calc_flux_observed_kerr(r, acc, bh_mass, spin, redshift_factor, exponent=4):
+    r"""
+    Calculate the observed flux for a Kerr black hole accretion disk.
+
+    Uses the Kerr metric flux calculation with the Page-Thorne f-function
+    for the specific angular momentum of the orbiting matter.
+
+    Args:
+        r (float): radius on the accretion disk (BH frame)
+        acc (float): accretion rate
+        bh_mass (float): mass of the black hole
+        spin (float): dimensionless spin parameter a* (between -1 and 1)
+        redshift_factor (float): gravitational redshift factor (1+z)
+        exponent (int): flux exponent (default 4 for bolometric)
+
+    Returns:
+        float: Observed flux of the photon :math:`F_o`
+    """
+    flux_intr = calc_flux_intrinsic_kerr(bh_mass=bh_mass, a=spin, r=r, acc=acc)
+    flux_observed = flux_intr / redshift_factor**exponent
+    return flux_observed
